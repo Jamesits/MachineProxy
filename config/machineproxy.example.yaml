@@ -1,0 +1,18 @@
+ssh:
+  addr: remote.server.example.com:22
+  user: dev
+  private_key_path: /home/dev/.ssh/id_ed25519
+  known_hosts_path: /home/dev/.ssh/known_hosts
+  keep_alive: 20s
+
+workspace:
+  remote_path: /workspace
+
+exec:
+  local_commands:
+    - /usr/bin/env
+    - /bin/sh
+  shim_path: /opt/machineproxy/mproxy-shim
+
+broker:
+  socket_path: /tmp/machineproxy.sock
