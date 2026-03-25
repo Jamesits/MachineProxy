@@ -1,0 +1,10 @@
+services:
+  ssh-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: localhost/machineproxy/test-ssh-server:latest
+    environment:
+      AUTHORIZED_KEY: "${AUTHORIZED_KEY}"
+    ports:
+      - "[::1]:12222:22"
