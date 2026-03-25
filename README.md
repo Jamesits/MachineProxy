@@ -1,6 +1,6 @@
 # MachineProxy
 
-Run a local program with a quesi-remote environment. The program is launched locally. File IO to specific directories and subprocesses are redirected to the remote device.
+This is Mixed Reality for programs. Run a local program with a quasi-remote environment. The program is launched locally. File IO to specific directories and subprocesses are redirected to the remote device.
 
 ![Project Status - Development](https://img.shields.io/badge/Project_Status-Development-red)
 ![100% AI Code](https://img.shields.io/badge/AI_Code-100%25-blue)
