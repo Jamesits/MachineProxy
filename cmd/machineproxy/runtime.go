@@ -5,14 +5,18 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
 	"time"
 
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/pkg/sftp"
 
+	"github.com/jamesits/machineproxy/pkg/agentproto"
+	"github.com/jamesits/machineproxy/pkg/agenttransfer"
 	"github.com/jamesits/machineproxy/pkg/broker"
 	"github.com/jamesits/machineproxy/pkg/config"
+	"github.com/jamesits/machineproxy/pkg/envfilter"
 	"github.com/jamesits/machineproxy/pkg/ns"
 	"github.com/jamesits/machineproxy/pkg/remoteexec"
 	"github.com/jamesits/machineproxy/pkg/sshconn"
@@ -27,6 +31,7 @@ type runtimeDeps struct {
 	fuseServer   *fuse.Server
 	bkr          *broker.Server
 	fuseMountDir string
+	recorder     *agentproto.Recorder
 
 	brokerCtxCancel context.CancelFunc
 }
@@ -55,6 +60,9 @@ func newRuntimeDeps(cfg *config.Config) (*runtimeDeps, error) {
 }
 
 func (d *runtimeDeps) Close() {
+	if d.recorder != nil {
+		_ = d.recorder.Close()
+	}
 	if d.brokerCtxCancel != nil {
 		d.brokerCtxCancel()
 	}
@@ -130,7 +138,58 @@ func (d *runtimeDeps) StartBroker(ctx context.Context) error {
 		return fmt.Errorf("create broker socket dir: %w", err)
 	}
 
-	d.bkr = broker.NewServer(broker.Deps{Remote: &remoteexec.SSHRunner{Provider: d.sshManager}})
+	agentLocalPath, err := resolveAgentBinaryPath(d.cfg.Agent.LocalPath)
+	if err != nil {
+		return fmt.Errorf("resolve agent binary: %w", err)
+	}
+
+	sftpRaw := d.sshManager.SFTP()
+	sftpClient, ok := sftpRaw.(*sftp.Client)
+	if !ok {
+		return fmt.Errorf("sftp client is not *sftp.Client for agent transfer")
+	}
+
+	transferer := agenttransfer.New(
+		func() *sftp.Client { return sftpClient },
+		agentLocalPath,
+		d.cfg.Agent.RemotePath,
+	)
+
+	// Set up session recording if configured.
+	if d.cfg.Recording.Path != "" && d.recorder == nil {
+		rec, recErr := agentproto.NewRecorder(d.cfg.Recording.Path)
+		if recErr != nil {
+			return fmt.Errorf("create session recorder: %w", recErr)
+		}
+		d.recorder = rec
+
+		username := "unknown"
+		if u, uErr := currentUsername(); uErr == nil {
+			username = u
+		}
+		_ = rec.WriteSessionHeader(&agentproto.SessionHeader{
+			Version:   version,
+			StartTime: time.Now().UnixNano(),
+			LocalUser: username,
+			LocalPID:  os.Getpid(),
+			SSHAddr:   d.cfg.SSH.Addr,
+			SSHUser:   d.cfg.SSH.User,
+			AgentPath: d.cfg.Agent.RemotePath,
+		})
+	}
+
+	envKeep := d.cfg.Exec.EnvKeep
+	envRemove := d.cfg.Exec.EnvRemove
+	d.bkr = broker.NewServer(broker.Deps{
+		Remote: &remoteexec.AgentRunner{
+			Provider:   d.sshManager,
+			Transferer: transferer,
+			Recorder:   d.recorder,
+		},
+		EnvFilter: func(env []string) []string {
+			return envfilter.Filter(env, envKeep, envRemove)
+		},
+	})
 	bctx, cancel := context.WithCancel(ctx)
 	d.brokerCtxCancel = cancel
 
@@ -195,4 +254,46 @@ func resolveHookLibraryPath() (string, error) {
 	}
 
 	return "", errors.New("cannot find hook library; set MPROXY_HOOK_LIB or build c/hook/libmproxyhook.so")
+}
+
+func resolveAgentBinaryPath(configPath string) (string, error) {
+	if p := os.Getenv("MPROXY_AGENT_BIN"); p != "" {
+		return p, nil
+	}
+
+	if configPath != "" {
+		if _, err := os.Stat(configPath); err != nil {
+			return "", fmt.Errorf("configured agent.local_path not found: %w", err)
+		}
+		return configPath, nil
+	}
+
+	// Look alongside the main binary first.
+	exe, err := os.Executable()
+	if err == nil {
+		dir := filepath.Dir(exe)
+		candidate := filepath.Join(dir, "mproxy-agent")
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		}
+	}
+
+	candidates := []string{
+		"/opt/machineproxy/mproxy-agent",
+	}
+	for _, p := range candidates {
+		if _, err := os.Stat(p); err == nil {
+			return p, nil
+		}
+	}
+
+	return "", errors.New("cannot find mproxy-agent binary; set MPROXY_AGENT_BIN, set agent.local_path in config, or place it alongside machineproxy")
+}
+
+func currentUsername() (string, error) {
+	u, err := user.Current()
+	if err != nil {
+		return "", err
+	}
+	return u.Username, nil
 }

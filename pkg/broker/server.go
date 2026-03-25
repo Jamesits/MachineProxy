@@ -3,16 +3,19 @@ package broker
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/jamesits/machineproxy/pkg/remoteexec"
 )
 
 type Deps struct {
-	Remote remoteexec.Runner
+	Remote    remoteexec.Runner
+	EnvFilter func(env []string) []string // nil means pass through unfiltered
 }
 
 type Server struct {
@@ -66,13 +69,12 @@ func (s *Server) serveConn(ctx context.Context, conn net.Conn) {
 		return
 	}
 
+	if s.deps.EnvFilter != nil {
+		req.Env = s.deps.EnvFilter(req.Env)
+	}
+
 	stdinReader, stdinWriter := io.Pipe()
 	defer stdinReader.Close()
-
-	go s.readStdinFrames(dec, stdinWriter)
-
-	stdoutReader, stdoutWriter := io.Pipe()
-	stderrReader, stderrWriter := io.Pipe()
 
 	var encMu sync.Mutex
 	send := func(frame Frame) {
@@ -81,21 +83,81 @@ func (s *Server) serveConn(ctx context.Context, conn net.Conn) {
 		_ = enc.Encode(frame)
 	}
 
+	stdoutReader, stdoutWriter := io.Pipe()
+	stderrReader, stderrWriter := io.Pipe()
+
 	var streamWG sync.WaitGroup
 	streamWG.Add(2)
 	go s.streamPipe(&streamWG, stdoutReader, StreamStdout, send)
 	go s.streamPipe(&streamWG, stderrReader, StreamStderr, send)
 
-	exitCode, runErr := s.runRemote(ctx, req, stdinReader, stdoutWriter, stderrWriter)
-	_ = stdoutWriter.Close()
-	_ = stderrWriter.Close()
-	streamWG.Wait()
+	// Check if the runner supports signals and extra fds.
+	sigRunner, hasSigRunner := s.deps.Remote.(remoteexec.SignalableRunner)
 
-	exitFrame := Frame{Stream: StreamExit, Code: exitCode}
-	if runErr != nil {
-		exitFrame.Error = runErr.Error()
+	if hasSigRunner {
+		sigCh := make(chan int, 8)
+
+		// Set up extra fd pipes.
+		extraFDPipes := make(map[uint32]io.ReadWriteCloser)
+		for _, fdNum := range req.ExtraFDs {
+			localR, localW := io.Pipe()
+			remoteR, remoteW := io.Pipe()
+
+			// Bridge remote → shim.
+			streamWG.Add(1)
+			fdStream := fmt.Sprintf("%s%d", StreamFDPrefix, fdNum)
+			go s.streamPipe(&streamWG, localR, fdStream, send)
+
+			extraFDPipes[fdNum] = &fdPipePair{
+				Reader:     remoteR,
+				Writer:     localW,
+				remoteW:    remoteW,
+				closeOnce:  sync.Once{},
+			}
+
+			// We store remoteW so readFrames can write to it.
+			_ = remoteW // kept alive via fdPipePair
+		}
+
+		// Read frames from shim: dispatches stdin, signals, and fd data.
+		go s.readFrames(dec, stdinWriter, sigCh, extraFDPipes)
+
+		ctrl := &remoteexec.Control{
+			Stdin:    stdinReader,
+			Stdout:   stdoutWriter,
+			Stderr:   stderrWriter,
+			Signals:  sigCh,
+			ExtraFDs: extraFDPipes,
+		}
+
+		exitCode, runErr := sigRunner.RunWithControl(ctx, req, ctrl)
+		_ = stdoutWriter.Close()
+		_ = stderrWriter.Close()
+		for _, rwc := range extraFDPipes {
+			rwc.Close()
+		}
+		streamWG.Wait()
+
+		exitFrame := Frame{Stream: StreamExit, Code: exitCode}
+		if runErr != nil {
+			exitFrame.Error = runErr.Error()
+		}
+		send(exitFrame)
+	} else {
+		// Legacy path: no signal/fd support.
+		go s.readFramesBasic(dec, stdinWriter)
+
+		exitCode, runErr := s.runRemote(ctx, req, stdinReader, stdoutWriter, stderrWriter)
+		_ = stdoutWriter.Close()
+		_ = stderrWriter.Close()
+		streamWG.Wait()
+
+		exitFrame := Frame{Stream: StreamExit, Code: exitCode}
+		if runErr != nil {
+			exitFrame.Error = runErr.Error()
+		}
+		send(exitFrame)
 	}
-	send(exitFrame)
 }
 
 func (s *Server) runRemote(ctx context.Context, req ExecRequest, stdin io.Reader, stdout io.Writer, stderr io.Writer) (int, error) {
@@ -109,7 +171,8 @@ func (s *Server) runRemote(ctx context.Context, req ExecRequest, stdin io.Reader
 	return code, err
 }
 
-func (s *Server) readStdinFrames(dec *json.Decoder, w *io.PipeWriter) {
+// readFramesBasic is the legacy frame reader that only handles stdin.
+func (s *Server) readFramesBasic(dec *json.Decoder, w *io.PipeWriter) {
 	defer w.Close()
 	for {
 		var frame Frame
@@ -124,6 +187,43 @@ func (s *Server) readStdinFrames(dec *json.Decoder, w *io.PipeWriter) {
 		}
 		if _, err := w.Write(frame.Data); err != nil {
 			return
+		}
+	}
+}
+
+// readFrames dispatches incoming shim frames to stdin, signals, and extra fd pipes.
+func (s *Server) readFrames(dec *json.Decoder, stdinW *io.PipeWriter, sigCh chan<- int, extraFDs map[uint32]io.ReadWriteCloser) {
+	defer stdinW.Close()
+	defer close(sigCh)
+
+	for {
+		var frame Frame
+		if err := dec.Decode(&frame); err != nil {
+			return
+		}
+
+		switch {
+		case frame.Stream == StreamStdin:
+			if len(frame.Data) > 0 {
+				if _, err := stdinW.Write(frame.Data); err != nil {
+					return
+				}
+			}
+
+		case frame.Stream == StreamSignal:
+			sigCh <- frame.Signal
+
+		case strings.HasPrefix(frame.Stream, StreamFDPrefix):
+			fdNumStr := frame.Stream[len(StreamFDPrefix):]
+			var fdNum uint32
+			if _, err := fmt.Sscanf(fdNumStr, "%d", &fdNum); err != nil {
+				continue
+			}
+			if p, ok := extraFDs[fdNum]; ok && len(frame.Data) > 0 {
+				if pp, ok := p.(*fdPipePair); ok {
+					_, _ = pp.remoteW.Write(frame.Data)
+				}
+			}
 		}
 	}
 }
@@ -144,4 +244,27 @@ func (s *Server) streamPipe(wg *sync.WaitGroup, r *io.PipeReader, stream string,
 			return
 		}
 	}
+}
+
+// fdPipePair implements io.ReadWriteCloser for bidirectional fd bridging.
+// Read returns data coming from the remote (agent → broker).
+// Write sends data to the local shim (broker → shim, via streamPipe).
+type fdPipePair struct {
+	io.Reader              // remote read end (data from agent)
+	io.Writer              // local write end (data to streamPipe → shim)
+	remoteW   *io.PipeWriter // write end for data from shim → agent
+	closeOnce sync.Once
+}
+
+func (p *fdPipePair) Close() error {
+	p.closeOnce.Do(func() {
+		if r, ok := p.Reader.(*io.PipeReader); ok {
+			r.Close()
+		}
+		if w, ok := p.Writer.(*io.PipeWriter); ok {
+			w.Close()
+		}
+		p.remoteW.Close()
+	})
+	return nil
 }

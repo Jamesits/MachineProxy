@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 
 	"github.com/jamesits/machineproxy/pkg/config"
 	"github.com/jamesits/machineproxy/pkg/supervisor"
@@ -14,6 +16,11 @@ const version = "0.1.0"
 
 func main() {
 	if err := run(); err != nil {
+		// Propagate the child process exit code when available.
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			os.Exit(exitErr.ExitCode())
+		}
 		fmt.Fprintf(os.Stderr, "machineproxy: %v\n", err)
 		os.Exit(1)
 	}

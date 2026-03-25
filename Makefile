@@ -4,7 +4,7 @@ GORELEASER ?= goreleaser
 .PHONY: build test clean
 
 build:
-	$(GORELEASER) build --snapshot --clean --single-target
+	$(GORELEASER) build --snapshot --clean
 	$(MAKE) -C hook all
 
 test:

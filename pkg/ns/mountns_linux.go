@@ -46,6 +46,7 @@ func (n *Namespace) Run(ctx context.Context, fuseMountDir, containerPath string,
 	args := []string{
 		"--dev-bind", "/", "/",
 		"--bind", fuseMountDir, containerPath,
+		"--chdir", containerPath,
 		"--die-with-parent",
 	}
 	args = append(args, cmdline...)
@@ -65,6 +66,7 @@ func (n *Namespace) Command(fuseMountDir, containerPath string, cmdline []string
 	args := []string{
 		"--dev-bind", "/", "/",
 		"--bind", fuseMountDir, containerPath,
+		"--chdir", containerPath,
 		"--die-with-parent",
 	}
 	args = append(args, cmdline...)

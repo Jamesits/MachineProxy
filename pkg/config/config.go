@@ -27,11 +27,22 @@ type Config struct {
 	Exec struct {
 		LocalCommands []string `yaml:"local_commands"`
 		ShimPath      string   `yaml:"shim_path"`
+		EnvKeep       []string `yaml:"env_keep"`   // glob patterns for inherited env vars to forward
+		EnvRemove     []string `yaml:"env_remove"` // glob patterns for env vars to always strip
 	} `yaml:"exec"`
 
 	Broker struct {
 		SocketPath string `yaml:"socket_path"`
 	} `yaml:"broker"`
+
+	Agent struct {
+		LocalPath  string `yaml:"local_path"`
+		RemotePath string `yaml:"remote_path"`
+	} `yaml:"agent"`
+
+	Recording struct {
+		Path string `yaml:"path"` // empty disables recording
+	} `yaml:"recording"`
 }
 
 func Load(r io.Reader) (*Config, error) {
@@ -57,6 +68,23 @@ func (c *Config) applyDefaults() error {
 	}
 	if c.Broker.SocketPath == "" {
 		c.Broker.SocketPath = "/tmp/machineproxy.sock"
+	}
+	if c.Agent.RemotePath == "" {
+		c.Agent.RemotePath = "/tmp/mproxy-agent"
+	}
+	if len(c.Exec.EnvKeep) == 0 {
+		c.Exec.EnvKeep = []string{
+			"HOME", "PATH", "TERM", "LANG", "LC_*",
+			"USER", "LOGNAME", "SHELL",
+			"EDITOR", "VISUAL", "PAGER",
+			"TZ", "DISPLAY", "SSH_AUTH_SOCK", "XDG_*",
+		}
+	}
+	if len(c.Exec.EnvRemove) == 0 {
+		c.Exec.EnvRemove = []string{
+			"LD_PRELOAD", "LD_LIBRARY_PATH",
+			"MPROXY_*",
+		}
 	}
 	if c.Exec.ShimPath != "" {
 		if !filepath.IsAbs(c.Exec.ShimPath) {

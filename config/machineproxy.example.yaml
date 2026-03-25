@@ -11,8 +11,41 @@ workspace:
 exec:
   local_commands:
     - /usr/bin/env
-    - /bin/sh
   shim_path: /opt/machineproxy/mproxy-shim
+
+  # Env vars added or changed by the parent process (after the hook loaded)
+  # are always forwarded. For inherited (unchanged) vars, only those matching
+  # env_keep patterns are sent; any matching env_remove are always stripped.
+  # env_remove takes priority over env_keep.
+  #
+  # env_keep:
+  #   - HOME
+  #   - PATH
+  #   - TERM
+  #   - LANG
+  #   - LC_*
+  #   - USER
+  #   - LOGNAME
+  #   - SHELL
+  #   - EDITOR
+  #   - VISUAL
+  #   - PAGER
+  #   - TZ
+  #   - DISPLAY
+  #   - SSH_AUTH_SOCK
+  #   - XDG_*
+  #
+  # env_remove:
+  #   - LD_PRELOAD
+  #   - LD_LIBRARY_PATH
+  #   - MPROXY_*
 
 broker:
   socket_path: /tmp/machineproxy.sock
+
+agent:
+  local_path: /opt/machineproxy/agent/linux/amd64/mproxy-agent
+  remote_path: /tmp/mproxy-agent
+
+# recording:
+#   path: /tmp/machineproxy-session.rec

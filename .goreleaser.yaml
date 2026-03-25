@@ -9,45 +9,42 @@ before:
     - go mod tidy
 
 builds:
-  - id: machineproxy
+  - &build-defaults
+    id: machineproxy
     main: ./cmd/machineproxy
     binary: machineproxy
     env:
       - CGO_ENABLED=0
-    goos:
-      - linux
-      - darwin
-    goarch:
-      - amd64
-      - arm64
     ldflags:
       - -s -w
       - -X main.version={{.Version}}
       - -X main.commit={{.Commit}}
       - -X main.date={{.Date}}
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
 
-  - id: mproxy-shim
+  - <<: *build-defaults
+    id: mproxy-shim
     main: ./cmd/mproxy-shim
     binary: mproxy-shim
-    env:
-      - CGO_ENABLED=0
-    goos:
-      - linux
-      - darwin
-    goarch:
-      - amd64
-      - arm64
+
+  - <<: *build-defaults
+    id: mproxy-agent
+    main: ./cmd/mproxy-agent
+    binary: agent/{{ .Os }}/{{ .Arch }}/mproxy-agent
+    no_unique_dist_dir: true
     ldflags:
       - -s -w
-      - -X main.version={{.Version}}
-      - -X main.commit={{.Commit}}
-      - -X main.date={{.Date}}
 
 archives:
   - id: machineproxy
-    builds:
+    ids:
       - machineproxy
       - mproxy-shim
+      - mproxy-agent
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     formats:
       - tar.gz

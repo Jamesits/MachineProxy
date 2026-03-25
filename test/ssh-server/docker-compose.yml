@@ -8,3 +8,5 @@ services:
       AUTHORIZED_KEY: "${AUTHORIZED_KEY}"
     ports:
       - "[::1]:12222:22"
+    volumes:
+      - ./workspace:/workspace

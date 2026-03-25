@@ -13,4 +13,8 @@ struct hook_decision {
 
 struct hook_decision hook_decide_exec(const char *pathname, char *const argv[]);
 
+// Testing helpers. These are not part of the public API.
+void hook_test_reset_snapshot(void);
+void hook_test_set_snapshot(char *const envp[]);
+
 #endif

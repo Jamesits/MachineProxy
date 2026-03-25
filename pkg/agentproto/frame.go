@@ -1,0 +1,34 @@
+package agentproto
+
+// FrameType identifies the kind of message on the CBOR mux.
+type FrameType uint8
+
+const (
+	FrameExec   FrameType = 1 // local → agent: start command
+	FrameData   FrameType = 2 // bidirectional: data for a stream
+	FrameEOF    FrameType = 3 // sender closes a stream
+	FrameSignal FrameType = 4 // local → agent: deliver signal to child pgid
+	FrameExit   FrameType = 5 // agent → local: child exited (terminal frame)
+	FrameError  FrameType = 6 // agent → local: internal error
+)
+
+// Frame is a single message on the CBOR mux. Fields are omitted when
+// zero-valued so only the relevant subset appears on the wire.
+type Frame struct {
+	Type   FrameType `cbor:"t"`
+	Stream uint32    `cbor:"s,omitempty"` // 0=stdin, 1=stdout, 2=stderr, 3+=extra fds
+	Data   []byte    `cbor:"d,omitempty"`
+	Signal int       `cbor:"sig,omitempty"`
+	Code   int       `cbor:"c,omitempty"`
+	Error  string    `cbor:"e,omitempty"`
+	Exec   *ExecMsg  `cbor:"x,omitempty"`
+}
+
+// ExecMsg carries the command details in a FrameExec.
+type ExecMsg struct {
+	Path     string   `cbor:"path"`
+	Argv     []string `cbor:"argv"`
+	Env      []string `cbor:"env"`
+	Cwd      string   `cbor:"cwd"`
+	ExtraFDs []uint32 `cbor:"fds,omitempty"`
+}
