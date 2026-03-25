@@ -32,7 +32,7 @@ make
 
 Common CLI-based AI coding agents assume that it is running on the same device of the workspace. But this assumption is not always true:
 
-- Some thread model forbids running an AI coding agent directly on certain devices
+- Some threat model forbids running an AI coding agent directly on certain devices
 - Some target devices are not qualified to run these modern, shiny NodeJS programs
 - Some environment does not work with software without proper packaging that come with "easy to use" one-liner install commands
 
