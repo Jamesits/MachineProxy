@@ -9,6 +9,9 @@ No need to read `README.md`, it is for humans.
 ## Code Style
 - Document the higher intention with comments
 
+## Compilation
+Always full recompile with `goreleaser build --snapshot --clean` and use the artifacts under `dist/`.
+
 ## Glossary
 ### Environments
 - Local: The operator's OS. `machineproxy` runs here.

@@ -19,11 +19,12 @@ Requirements:
 
 - Golang
 - Goreleaser 2+
-- C compiler for your own machine's architecture
-- GNU Make
+- [Bubblewrap](https://github.com/containers/bubblewrap)
+
+Building:
 
 ```shell
-make
+goreleaser build --snapshot --clean
 ```
 
 ## FAQ
