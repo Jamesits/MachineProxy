@@ -1,8 +1,8 @@
 # MachineProxy
+No need to read `README.md`, it is for humans.
 
 ## Tech Stack
-- Use C for the hook library
-- Use Golang for everything else, build with Goreleaser
+- Use Golang for everything, build with Goreleaser
 - All serialization should use CBOR
 - Container use Bubblewrap (use `man bwrap` to read usage)
 

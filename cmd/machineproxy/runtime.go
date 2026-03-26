@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/hanwen/go-fuse/v2/fuse"
@@ -221,7 +222,7 @@ func (d *runtimeDeps) RunChild(ctx context.Context, cmdline []string) error {
 		return errors.New("missing child command")
 	}
 
-	hookLibrary, err := resolveHookLibraryPath()
+	tracerBin, err := resolveTracerPath()
 	if err != nil {
 		return err
 	}
@@ -230,30 +231,48 @@ func (d *runtimeDeps) RunChild(ctx context.Context, cmdline []string) error {
 		os.Environ(),
 		d.cfg.Broker.SocketPath,
 		d.cfg.Exec.ShimPath,
-		d.cfg.Exec.LocalCommands,
-		hookLibrary,
 	)
 
-	return d.namespace.Run(ctx, d.fuseMountDir, d.cfg.Workspace.RemotePath, cmdline, env)
+	// Wrap the command in the ptrace-based tracer so exec interception
+	// works with both dynamically and statically linked binaries.
+	tracerArgs := []string{
+		tracerBin,
+		"--shim-path", d.cfg.Exec.ShimPath,
+		"--broker-sock", d.cfg.Broker.SocketPath,
+	}
+	if len(d.cfg.Exec.LocalCommands) > 0 {
+		tracerArgs = append(tracerArgs, "--whitelist", strings.Join(d.cfg.Exec.LocalCommands, ":"))
+	}
+	tracerArgs = append(tracerArgs, "--")
+	tracerArgs = append(tracerArgs, cmdline...)
+
+	return d.namespace.Run(ctx, d.fuseMountDir, d.cfg.Workspace.RemotePath, tracerArgs, env)
 }
 
-func resolveHookLibraryPath() (string, error) {
-	if p := os.Getenv("MPROXY_HOOK_LIB"); p != "" {
+func resolveTracerPath() (string, error) {
+	if p := os.Getenv("MPROXY_TRACER_BIN"); p != "" {
 		return p, nil
 	}
 
-	candidates := []string{
-		"/opt/machineproxy/libmproxyhook.so",
-		"c/hook/libmproxyhook.so",
+	// Look alongside the main binary first.
+	exe, err := os.Executable()
+	if err == nil {
+		candidate := filepath.Join(filepath.Dir(exe), "mproxy-tracer")
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		}
 	}
 
+	candidates := []string{
+		"/opt/machineproxy/mproxy-tracer",
+	}
 	for _, p := range candidates {
 		if _, err := os.Stat(p); err == nil {
 			return p, nil
 		}
 	}
 
-	return "", errors.New("cannot find hook library; set MPROXY_HOOK_LIB or build c/hook/libmproxyhook.so")
+	return "", errors.New("cannot find mproxy-tracer binary; set MPROXY_TRACER_BIN or place it alongside machineproxy")
 }
 
 func resolveAgentBinaryPath(configPath string) (string, error) {

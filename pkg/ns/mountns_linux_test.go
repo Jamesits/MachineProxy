@@ -53,6 +53,7 @@ func TestCommandBuildsCorrectArgs(t *testing.T) {
 	expected := []string{
 		"--dev-bind", "/", "/",
 		"--bind", "/tmp/fuse-123", "/workspace",
+		"--chdir", "/workspace",
 		"--die-with-parent",
 		"/bin/sh", "-c", "echo hi",
 	}
@@ -69,7 +70,7 @@ func TestCommandBuildsCorrectArgs(t *testing.T) {
 
 func TestFormatEnvInjectsVariables(t *testing.T) {
 	base := []string{"HOME=/home/dev", "PATH=/usr/bin"}
-	env := FormatEnv(base, "/tmp/broker.sock", "/opt/shim", []string{"/usr/bin/env"}, "/opt/hook.so")
+	env := FormatEnv(base, "/tmp/broker.sock", "/opt/shim")
 
 	find := func(prefix string) string {
 		for _, e := range env {
@@ -86,22 +87,15 @@ func TestFormatEnvInjectsVariables(t *testing.T) {
 	if v := find("MPROXY_SHIM_PATH="); v != "/opt/shim" {
 		t.Fatalf("MPROXY_SHIM_PATH=%q", v)
 	}
-	if v := find("MPROXY_WHITELIST="); v != "/usr/bin/env" {
-		t.Fatalf("MPROXY_WHITELIST=%q", v)
-	}
-	if v := find("LD_PRELOAD="); v != "/opt/hook.so" {
-		t.Fatalf("LD_PRELOAD=%q", v)
-	}
 }
 
-func TestFormatEnvAppendsExistingLdPreload(t *testing.T) {
-	base := []string{"LD_PRELOAD=/existing/lib.so"}
-	env := FormatEnv(base, "", "", nil, "/opt/hook.so")
+func TestFormatEnvDoesNotInjectLdPreload(t *testing.T) {
+	base := []string{"HOME=/home/dev"}
+	env := FormatEnv(base, "", "")
 
 	for _, e := range env {
-		if e == "LD_PRELOAD=/opt/hook.so:/existing/lib.so" {
-			return
+		if len(e) >= 11 && e[:11] == "LD_PRELOAD=" {
+			t.Fatalf("unexpected LD_PRELOAD in env: %v", env)
 		}
 	}
-	t.Fatalf("LD_PRELOAD not correctly merged: %v", env)
 }

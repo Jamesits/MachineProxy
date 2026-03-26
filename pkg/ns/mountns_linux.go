@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"os/exec"
-	"strings"
 )
 
 // Deps allows dependency injection for testing.
@@ -78,26 +77,12 @@ func (n *Namespace) Command(fuseMountDir, containerPath string, cmdline []string
 func (n *Namespace) Leave() {}
 
 // FormatEnv builds the environment slice for the child process,
-// injecting machineproxy-specific variables and LD_PRELOAD.
-func FormatEnv(base []string, brokerSock, shimPath string, whitelist []string, hookLib string) []string {
+// injecting machineproxy-specific variables needed by the shim.
+func FormatEnv(base []string, brokerSock, shimPath string) []string {
 	env := append([]string{}, base...)
 	env = append(env,
 		"MPROXY_BROKER_SOCK="+brokerSock,
 		"MPROXY_SHIM_PATH="+shimPath,
-		"MPROXY_WHITELIST="+strings.Join(whitelist, ":"),
 	)
-
-	existing := ""
-	for _, e := range base {
-		if strings.HasPrefix(e, "LD_PRELOAD=") {
-			existing = e[len("LD_PRELOAD="):]
-			break
-		}
-	}
-	if existing != "" {
-		env = append(env, "LD_PRELOAD="+hookLib+":"+existing)
-	} else {
-		env = append(env, "LD_PRELOAD="+hookLib)
-	}
 	return env
 }

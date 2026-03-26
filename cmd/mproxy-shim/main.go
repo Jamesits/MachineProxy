@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -31,6 +32,9 @@ func Run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 
 	conn, err := net.Dial("unix", socketPath)
 	if err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			fmt.Fprintf(stderr, "mproxy-shim: %s: permission denied (stale socket?)\n", socketPath)
+		}
 		return 127
 	}
 	defer conn.Close()

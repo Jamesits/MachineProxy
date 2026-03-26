@@ -32,6 +32,11 @@ builds:
     binary: mproxy-shim
 
   - <<: *build-defaults
+    id: mproxy-tracer
+    main: ./cmd/mproxy-tracer
+    binary: mproxy-tracer
+
+  - <<: *build-defaults
     id: mproxy-agent
     main: ./cmd/mproxy-agent
     binary: agent/{{ .Os }}/{{ .Arch }}/mproxy-agent
@@ -44,6 +49,7 @@ archives:
     ids:
       - machineproxy
       - mproxy-shim
+      - mproxy-tracer
       - mproxy-agent
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     formats:
