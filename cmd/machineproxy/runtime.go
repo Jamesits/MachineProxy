@@ -165,7 +165,7 @@ func (d *runtimeDeps) StartBroker(ctx context.Context) error {
 		return fmt.Errorf("create broker socket dir: %w", err)
 	}
 
-	agentLocalPath, err := resolveAgentBinaryPath(d.cfg.Agent.LocalPath)
+	agentLocalPath, err := config.ResolveAgentBinaryPath(d.cfg.Agent.LocalPath)
 	if err != nil {
 		return fmt.Errorf("resolve agent binary: %w", err)
 	}
@@ -197,7 +197,7 @@ func (d *runtimeDeps) StartBroker(ctx context.Context) error {
 			username = u
 		}
 		if err := rec.WriteSessionHeader(&agentproto.SessionHeader{
-			Version:   version,
+			Version:   config.Version,
 			StartTime: time.Now().UnixNano(),
 			LocalUser: username,
 			LocalPID:  os.Getpid(),
@@ -258,23 +258,29 @@ func (d *runtimeDeps) RunChild(ctx context.Context, cmdline []string) error {
 		return errors.New("missing child command")
 	}
 
-	tracerBin, err := resolveTracerPath(d.cfg.Exec.TracerPath)
+	tracerBin, err := config.ResolveTracerPath(d.cfg.Exec.TracerPath)
 	if err != nil {
 		return err
 	}
 	d.log.Log(ctx, logging.LevelTrace, "resolved tracer binary", "path", tracerBin)
 
+	shimBin, err := config.ResolveShimPath(d.cfg.Exec.ShimPath)
+	if err != nil {
+		return err
+	}
+	d.log.Log(ctx, logging.LevelTrace, "resolved shim binary", "path", shimBin)
+
 	env := ns.FormatEnv(
 		os.Environ(),
 		d.cfg.Broker.SocketPath,
-		d.cfg.Exec.ShimPath,
+		shimBin,
 	)
 
 	// Wrap the command in the ptrace-based tracer so exec interception
 	// works with both dynamically and statically linked binaries.
 	tracerArgs := []string{
 		tracerBin,
-		"--shim-path", d.cfg.Exec.ShimPath,
+		"--shim-path", shimBin,
 		"--broker-sock", d.cfg.Broker.SocketPath,
 		"--log-level", d.cfg.LogLevel,
 	}
@@ -286,71 +292,6 @@ func (d *runtimeDeps) RunChild(ctx context.Context, cmdline []string) error {
 
 	d.log.Log(ctx, logging.LevelTrace, "launching child via tracer", "tracer", tracerBin, "command", cmdline)
 	return d.namespace.Run(ctx, d.fuseMountDir, d.cfg.Workspace.RemotePath, tracerArgs, env)
-}
-
-// resolveTracerPath finds the mproxy-tracer binary using the config value,
-// then falling back to adjacent binary and well-known paths.
-func resolveTracerPath(configPath string) (string, error) {
-	if configPath != "" {
-		if _, err := os.Stat(configPath); err != nil {
-			return "", fmt.Errorf("configured exec.tracer_path not found: %w", err)
-		}
-		return configPath, nil
-	}
-
-	// Look alongside the main binary first.
-	exe, err := os.Executable()
-	if err == nil {
-		candidate := filepath.Join(filepath.Dir(exe), "mproxy-tracer")
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
-		}
-	}
-
-	candidates := []string{
-		"/opt/machineproxy/mproxy-tracer",
-	}
-	for _, p := range candidates {
-		if _, err := os.Stat(p); err == nil {
-			return p, nil
-		}
-	}
-
-	return "", errors.New("cannot find mproxy-tracer binary; set exec.tracer_path in config or place it alongside machineproxy")
-}
-
-func resolveAgentBinaryPath(configPath string) (string, error) {
-	if p := os.Getenv("MPROXY_AGENT_BIN"); p != "" {
-		return p, nil
-	}
-
-	if configPath != "" {
-		if _, err := os.Stat(configPath); err != nil {
-			return "", fmt.Errorf("configured agent.local_path not found: %w", err)
-		}
-		return configPath, nil
-	}
-
-	// Look alongside the main binary first.
-	exe, err := os.Executable()
-	if err == nil {
-		dir := filepath.Dir(exe)
-		candidate := filepath.Join(dir, "mproxy-agent")
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
-		}
-	}
-
-	candidates := []string{
-		"/opt/machineproxy/mproxy-agent",
-	}
-	for _, p := range candidates {
-		if _, err := os.Stat(p); err == nil {
-			return p, nil
-		}
-	}
-
-	return "", errors.New("cannot find mproxy-agent binary; set MPROXY_AGENT_BIN, set agent.local_path in config, or place it alongside machineproxy")
 }
 
 func currentUsername() (string, error) {

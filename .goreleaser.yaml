@@ -17,9 +17,9 @@ builds:
       - CGO_ENABLED=0
     ldflags:
       - -s -w
-      - -X main.version={{.Version}}
-      - -X main.commit={{.Commit}}
-      - -X main.date={{.Date}}
+      - -X github.com/jamesits/machineproxy/pkg/config.Version={{.Version}}
+      - -X github.com/jamesits/machineproxy/pkg/config.Commit={{.Commit}}
+      - -X github.com/jamesits/machineproxy/pkg/config.Date={{.Date}}
     goos:
       - linux
     goarch:
@@ -58,6 +58,25 @@ archives:
       - goos: windows
         formats:
           - zip
+
+nfpms:
+  - id: machineproxy
+    package_name: machineproxy
+    description: Machine proxy for remote execution
+    formats:
+      - deb
+      - rpm
+    dependencies:
+      - bubblewrap
+    contents:
+      - src: machineproxy
+        dst: /usr/bin/machineproxy
+      - src: mproxy-shim
+        dst: /usr/lib/machineproxy/mproxy-shim
+      - src: mproxy-tracer
+        dst: /usr/lib/machineproxy/mproxy-tracer
+      - src: agent/{{ .Os }}/{{ .Arch }}/mproxy-agent
+        dst: /usr/lib/machineproxy/agent/{{ .Os }}/{{ .Arch }}/mproxy-agent
 
 checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"

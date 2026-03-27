@@ -131,9 +131,6 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("exec.local_commands entry must be absolute path: %q", p)
 		}
 	}
-	if c.Exec.ShimPath == "" {
-		return errors.New("exec.shim_path is required")
-	}
 	if c.Broker.SocketPath == "" {
 		return errors.New("broker.socket_path is required")
 	}

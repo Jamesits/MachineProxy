@@ -13,8 +13,6 @@ import (
 	"github.com/jamesits/machineproxy/pkg/supervisor"
 )
 
-const version = "0.1.0"
-
 func main() {
 	if err := run(); err != nil {
 		// Propagate the child process exit code when available.
@@ -36,7 +34,7 @@ func run() error {
 	flag.Parse()
 
 	if showVersion {
-		fmt.Printf("machineproxy %s\n", version)
+		fmt.Printf("machineproxy %s\n", config.Version)
 		return nil
 	}
 
@@ -52,7 +50,7 @@ func run() error {
 	}
 
 	log := logging.Setup(cfg.LogLevel)
-	log.Debug("config loaded", "path", cfgPath, "version", version)
+	log.Debug("config loaded", "path", cfgPath, "version", config.Version)
 
 	if flag.NArg() == 0 {
 		return fmt.Errorf("missing command to run")

@@ -14,8 +14,9 @@ workspace:
 exec:
   local_commands:
     - /usr/bin/env
-  shim_path: /opt/machineproxy/mproxy-shim
-  tracer_path: /opt/machineproxy/mproxy-tracer
+  # All binary paths are auto-discovered from /usr/lib/machineproxy/ when omitted.
+  # shim_path: /usr/lib/machineproxy/mproxy-shim
+  # tracer_path: /usr/lib/machineproxy/mproxy-tracer
 
   # Env vars added or changed by the parent process (after the hook loaded)
   # are always forwarded. For inherited (unchanged) vars, only those matching
@@ -48,7 +49,7 @@ broker:
   socket_path: /tmp/machineproxy.sock
 
 agent:
-  local_path: /opt/machineproxy/agent/linux/amd64/mproxy-agent
+  # local_path: /usr/lib/machineproxy/agent/linux/amd64/mproxy-agent
   remote_path: /tmp/mproxy-agent
 
 # recording:
