@@ -152,6 +152,100 @@ container:
 	}
 }
 
+func TestValidateLocalCommandFullPath(t *testing.T) {
+	if err := validateLocalCommand("/usr/bin/env"); err != nil {
+		t.Fatalf("expected valid, got %v", err)
+	}
+}
+
+func TestValidateLocalCommandRegex(t *testing.T) {
+	if err := validateLocalCommand("/^node/"); err != nil {
+		t.Fatalf("expected valid regex, got %v", err)
+	}
+}
+
+func TestValidateLocalCommandRegexInvalid(t *testing.T) {
+	err := validateLocalCommand("/[invalid/")
+	if err == nil {
+		t.Fatal("expected error for invalid regex")
+	}
+}
+
+func TestValidateLocalCommandBasename(t *testing.T) {
+	if err := validateLocalCommand("env"); err != nil {
+		t.Fatalf("expected valid basename, got %v", err)
+	}
+}
+
+func TestValidateLocalCommandMiddleSlashRejected(t *testing.T) {
+	err := validateLocalCommand("usr/bin/env")
+	if err == nil {
+		t.Fatal("expected error for middle slashes")
+	}
+	if !strings.Contains(err.Error(), "slashes in the middle") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestValidateLocalCommandEmpty(t *testing.T) {
+	err := validateLocalCommand("")
+	if err == nil {
+		t.Fatal("expected error for empty entry")
+	}
+}
+
+func TestValidateLocalCommandEmptyRegex(t *testing.T) {
+	err := validateLocalCommand("//")
+	if err == nil {
+		t.Fatal("expected error for empty regex")
+	}
+}
+
+func TestLoadAcceptsAllLocalCommandForms(t *testing.T) {
+	raw := `
+remote:
+  ssh:
+    addr: 127.0.0.1:22
+    user: dev
+    private_key_path: /tmp/id_ed25519
+container:
+  local_commands:
+    - /usr/bin/env
+    - /^python.*/
+    - node
+  mounts:
+    - /workspace
+`
+
+	cfg, err := Load(strings.NewReader(raw))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(cfg.Container.LocalCommands) != 3 {
+		t.Fatalf("expected 3 local_commands, got %d", len(cfg.Container.LocalCommands))
+	}
+}
+
+func TestLoadRejectsMiddleSlashLocalCommand(t *testing.T) {
+	raw := `
+remote:
+  ssh:
+    addr: 127.0.0.1:22
+    user: dev
+    private_key_path: /tmp/id_ed25519
+container:
+  local_commands:
+    - usr/bin/env
+  mounts:
+    - /workspace
+`
+
+	_, err := Load(strings.NewReader(raw))
+	if err == nil || !strings.Contains(err.Error(), "slashes in the middle") {
+		t.Fatalf("expected middle-slash validation error, got: %v", err)
+	}
+}
+
 func TestParseMountRemoteOnly(t *testing.T) {
 	m, err := ParseMount("/workspace")
 	if err != nil {

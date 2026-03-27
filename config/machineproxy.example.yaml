@@ -14,6 +14,11 @@ remote:
   # arch: amd64
 
 container:
+  # Commands that run locally inside the container instead of being forwarded
+  # to the remote. Three matching forms are supported:
+  #   /usr/bin/env    — full absolute path match
+  #   /^python.*/     — regex match (delimited by slashes)
+  #   env             — basename match (last segment of the executable path)
   local_commands:
     - /usr/bin/env
   # Docker-compose style mounts: [local_path:]remote_path

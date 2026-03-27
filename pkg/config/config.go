@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -176,9 +177,53 @@ func (c *Config) Validate() error {
 		return errors.New("container.local_commands must not be empty")
 	}
 	for _, p := range c.Container.LocalCommands {
-		if !filepath.IsAbs(p) {
-			return fmt.Errorf("container.local_commands entry must be absolute path: %q", p)
+		if err := validateLocalCommand(p); err != nil {
+			return fmt.Errorf("container.local_commands: %w", err)
 		}
 	}
+	return nil
+}
+
+// validateLocalCommand checks that a local_commands entry uses a supported
+// matching form:
+//   - "/absolute/path"  — full path match (starts with /, no trailing /)
+//   - "/regex/"         — regex pattern (starts and ends with /)
+//   - "basename"        — last-segment match (no slashes at all)
+//
+// Entries with slashes only in the middle (e.g. "usr/bin/env") are rejected.
+func validateLocalCommand(s string) error {
+	if s == "" {
+		return errors.New("entry must not be empty")
+	}
+
+	startsSlash := strings.HasPrefix(s, "/")
+	endsSlash := strings.HasSuffix(s, "/") && len(s) > 1
+
+	switch {
+	// /regex/ — delimited regex pattern
+	case startsSlash && endsSlash:
+		pattern := s[1 : len(s)-1]
+		if pattern == "" {
+			return fmt.Errorf("regex pattern must not be empty: %q", s)
+		}
+		if _, err := regexp.Compile(pattern); err != nil {
+			return fmt.Errorf("invalid regex in %q: %w", s, err)
+		}
+
+	// /absolute/path — full path match
+	case startsSlash && !endsSlash:
+		if !filepath.IsAbs(s) {
+			return fmt.Errorf("entry must be an absolute path: %q", s)
+		}
+
+	// basename — match against last segment of the executable path
+	case !startsSlash && !strings.Contains(s, "/"):
+		// bare name, valid
+
+	// Reject: slashes only in the middle (e.g. "usr/bin/env")
+	default:
+		return fmt.Errorf("entry %q has slashes in the middle; use an absolute path (/usr/bin/env), a regex (/pattern/), or a bare name (env)", s)
+	}
+
 	return nil
 }
