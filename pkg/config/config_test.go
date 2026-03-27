@@ -57,6 +57,101 @@ container:
 	}
 }
 
+func TestLoadParsesAgentEnvConfig(t *testing.T) {
+	raw := `
+remote:
+  ssh:
+    addr: 127.0.0.1:22
+    user: dev
+    private_key_path: /tmp/id_ed25519
+container:
+  local_commands:
+    - /usr/bin/env
+  mounts:
+    - /workspace
+agent:
+  env_keep:
+    - HOME
+    - PATH
+    - /^AWS_/
+  env_remove:
+    - MPROXY_*
+    - /SECRET/
+`
+
+	cfg, err := Load(strings.NewReader(raw))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if len(cfg.Agent.EnvKeep) != 3 {
+		t.Fatalf("expected 3 env_keep entries, got %d: %v", len(cfg.Agent.EnvKeep), cfg.Agent.EnvKeep)
+	}
+	if cfg.Agent.EnvKeep[2] != "/^AWS_/" {
+		t.Fatalf("expected regex pattern /^AWS_/, got %s", cfg.Agent.EnvKeep[2])
+	}
+	if len(cfg.Agent.EnvRemove) != 2 {
+		t.Fatalf("expected 2 env_remove entries, got %d: %v", len(cfg.Agent.EnvRemove), cfg.Agent.EnvRemove)
+	}
+}
+
+func TestLoadDefaultsAgentEnv(t *testing.T) {
+	raw := `
+remote:
+  ssh:
+    addr: 127.0.0.1:22
+    user: dev
+    private_key_path: /tmp/id_ed25519
+container:
+  local_commands:
+    - /usr/bin/env
+  mounts:
+    - /workspace
+`
+
+	cfg, err := Load(strings.NewReader(raw))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if len(cfg.Agent.EnvKeep) == 0 {
+		t.Fatal("expected non-empty default agent.env_keep")
+	}
+	if len(cfg.Agent.EnvRemove) == 0 {
+		t.Fatal("expected non-empty default agent.env_remove")
+	}
+	if len(cfg.Container.EnvRemove) == 0 {
+		t.Fatal("expected non-empty default container.env_remove")
+	}
+}
+
+func TestLoadParsesContainerEnvRemove(t *testing.T) {
+	raw := `
+remote:
+  ssh:
+    addr: 127.0.0.1:22
+    user: dev
+    private_key_path: /tmp/id_ed25519
+container:
+  local_commands:
+    - /usr/bin/env
+  mounts:
+    - /workspace
+  env_remove:
+    - MPROXY_*
+    - /^UNSAFE_/
+`
+
+	cfg, err := Load(strings.NewReader(raw))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if len(cfg.Container.EnvRemove) != 2 {
+		t.Fatalf("expected 2 container.env_remove entries, got %d", len(cfg.Container.EnvRemove))
+	}
+}
+
 func TestParseMountRemoteOnly(t *testing.T) {
 	m, err := ParseMount("/workspace")
 	if err != nil {

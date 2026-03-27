@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/jamesits/machineproxy/pkg/agentproto"
+	"github.com/jamesits/machineproxy/pkg/envfilter"
 	"github.com/jamesits/machineproxy/pkg/logging"
 )
 
@@ -40,15 +41,32 @@ func run() int {
 	log = slog.New(agentproto.NewMuxLogHandler(mux, logging.LevelTrace))
 	slog.SetDefault(log)
 
-	// Read the first frame through the mux's decoder — must be FrameExec.
+	// Read initial frames: optional FrameConfig followed by required FrameExec.
+	var agentCfg *agentproto.AgentConfig
 	f, err := mux.DecodeOne()
 	if err != nil {
-		log.Error("reading exec frame failed", "error", err)
+		log.Error("reading initial frame failed", "error", err)
 		return 127
 	}
+	if f.Type == agentproto.FrameConfig && f.Config != nil {
+		agentCfg = f.Config
+		log.Log(ctx, logging.LevelTrace, "received agent config",
+			"env_keep", len(agentCfg.EnvKeep), "env_remove", len(agentCfg.EnvRemove))
+		// Read the next frame which must be FrameExec.
+		f, err = mux.DecodeOne()
+		if err != nil {
+			log.Error("reading exec frame failed", "error", err)
+			return 127
+		}
+	}
 	if f.Type != agentproto.FrameExec || f.Exec == nil {
-		log.Error("first frame must be exec", "type", f.Type)
+		log.Error("expected exec frame", "type", f.Type)
 		return 127
+	}
+
+	// Apply agent-side env filtering if config was provided.
+	if agentCfg != nil {
+		f.Exec.Env = envfilter.Filter(f.Exec.Env, agentCfg.EnvKeep, agentCfg.EnvRemove)
 	}
 
 	log.Log(ctx, logging.LevelTrace, "building command", "path", f.Exec.Path, "argv", f.Exec.Argv, "cwd", f.Exec.Cwd)

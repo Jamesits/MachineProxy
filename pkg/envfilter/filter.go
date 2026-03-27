@@ -3,15 +3,78 @@
 // The C hook library sets MPROXY_CHANGED_ENVS with the names of variables
 // that were added or modified after the hook was loaded. These are always
 // forwarded. Other variables are filtered through configurable keep/remove
-// glob patterns (similar to sudo's env_keep).
+// patterns (similar to sudo's env_keep).
+//
+// Patterns are either globs (filepath.Match syntax) or regexes delimited
+// by slashes (e.g. /^AWS_/).
 package envfilter
 
 import (
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
 const changedEnvsKey = "MPROXY_CHANGED_ENVS"
+
+// matcher is a compiled pattern that can test env var names.
+type matcher interface {
+	Match(name string) bool
+}
+
+type globMatcher string
+
+func (g globMatcher) Match(name string) bool {
+	matched, _ := filepath.Match(string(g), name)
+	return matched
+}
+
+type regexMatcher struct {
+	re *regexp.Regexp
+}
+
+func (r *regexMatcher) Match(name string) bool {
+	return r.re.MatchString(name)
+}
+
+// compileMatcher parses a single pattern string. Patterns enclosed in
+// slashes (e.g. /^AWS_/) are compiled as regexes; everything else is
+// treated as a glob.
+func compileMatcher(pattern string) (matcher, error) {
+	if strings.HasPrefix(pattern, "/") && strings.HasSuffix(pattern, "/") && len(pattern) > 2 {
+		expr := pattern[1 : len(pattern)-1]
+		re, err := regexp.Compile(expr)
+		if err != nil {
+			return nil, err
+		}
+		return &regexMatcher{re: re}, nil
+	}
+	return globMatcher(pattern), nil
+}
+
+// compileAll compiles a slice of pattern strings into matchers.
+// Invalid regex patterns are silently skipped.
+func compileAll(patterns []string) []matcher {
+	out := make([]matcher, 0, len(patterns))
+	for _, p := range patterns {
+		m, err := compileMatcher(p)
+		if err != nil {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// matchesAnyCompiled returns true if name matches any compiled matcher.
+func matchesAnyCompiled(name string, matchers []matcher) bool {
+	for _, m := range matchers {
+		if m.Match(name) {
+			return true
+		}
+	}
+	return false
+}
 
 // Filter returns a filtered copy of env suitable for sending to the remote.
 //
@@ -22,6 +85,27 @@ const changedEnvsKey = "MPROXY_CHANGED_ENVS"
 //  4. If a var name matches any keep pattern → keep.
 //  5. Otherwise → drop.
 func Filter(env []string, keep []string, remove []string) []string {
+	keepM := compileAll(keep)
+	removeM := compileAll(remove)
+	return filterCompiled(env, keepM, removeM)
+}
+
+// Remove returns a copy of env with variables matching any remove pattern
+// stripped. Unlike Filter, there is no keep list — all non-matching vars
+// are preserved.
+func Remove(env []string, remove []string) []string {
+	removeM := compileAll(remove)
+	out := make([]string, 0, len(env))
+	for _, entry := range env {
+		name := envName(entry)
+		if !matchesAnyCompiled(name, removeM) {
+			out = append(out, entry)
+		}
+	}
+	return out
+}
+
+func filterCompiled(env []string, keep []matcher, remove []matcher) []string {
 	changed := parseChangedEnvs(env)
 
 	out := make([]string, 0, len(env))
@@ -33,11 +117,11 @@ func Filter(env []string, keep []string, remove []string) []string {
 			continue
 		}
 
-		if matchesAny(name, remove) {
+		if matchesAnyCompiled(name, remove) {
 			continue
 		}
 
-		if changed[name] || matchesAny(name, keep) {
+		if changed[name] || matchesAnyCompiled(name, keep) {
 			out = append(out, entry)
 		}
 	}
@@ -74,12 +158,8 @@ func envName(entry string) string {
 	return entry
 }
 
-// matchesAny returns true if name matches any of the glob patterns.
+// matchesAny returns true if name matches any of the glob/regex patterns.
+// Kept for backward compatibility; new code should use compileAll + matchesAnyCompiled.
 func matchesAny(name string, patterns []string) bool {
-	for _, p := range patterns {
-		if matched, _ := filepath.Match(p, name); matched {
-			return true
-		}
-	}
-	return false
+	return matchesAnyCompiled(name, compileAll(patterns))
 }

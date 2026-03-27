@@ -113,3 +113,120 @@ func TestFilter_ChangedEnvsStrippedFromOutput(t *testing.T) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 }
+
+func TestFilter_RegexKeep(t *testing.T) {
+	env := []string{
+		"AWS_ACCESS_KEY_ID=key",
+		"AWS_SECRET_ACCESS_KEY=secret",
+		"HOME=/home/test",
+		"UNRELATED=val",
+	}
+	keep := []string{"/^AWS_/", "HOME"}
+	remove := []string{}
+
+	got := Filter(env, keep, remove)
+	want := []string{
+		"AWS_ACCESS_KEY_ID=key",
+		"AWS_SECRET_ACCESS_KEY=secret",
+		"HOME=/home/test",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestFilter_RegexRemove(t *testing.T) {
+	env := []string{
+		"HOME=/home/test",
+		"DB_SECRET_TOKEN=abc",
+		"API_SECRET_KEY=xyz",
+		"PATH=/usr/bin",
+	}
+	keep := []string{"*"}
+	remove := []string{"/SECRET/"}
+
+	got := Filter(env, keep, remove)
+	want := []string{
+		"HOME=/home/test",
+		"PATH=/usr/bin",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestFilter_MixedGlobAndRegex(t *testing.T) {
+	env := []string{
+		"HOME=/home/test",
+		"LC_ALL=en",
+		"CUSTOM_VAR_123=val",
+		"CUSTOM_VAR_ABC=val",
+		"UNRELATED=x",
+	}
+	// Keep HOME, LC_* (glob), and anything matching CUSTOM_VAR_\d+ (regex)
+	keep := []string{"HOME", "LC_*", `/^CUSTOM_VAR_\d+$/`}
+	remove := []string{}
+
+	got := Filter(env, keep, remove)
+	want := []string{
+		"HOME=/home/test",
+		"LC_ALL=en",
+		"CUSTOM_VAR_123=val",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestRemove(t *testing.T) {
+	env := []string{
+		"HOME=/home/test",
+		"MPROXY_BROKER_SOCK=/tmp/mp.sock",
+		"MPROXY_SHIM_PATH=/opt/shim",
+		"PATH=/usr/bin",
+	}
+	remove := []string{"MPROXY_*"}
+
+	got := Remove(env, remove)
+	want := []string{
+		"HOME=/home/test",
+		"PATH=/usr/bin",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestRemove_Regex(t *testing.T) {
+	env := []string{
+		"HOME=/home/test",
+		"UNSAFE_VAR=bad",
+		"PATH=/usr/bin",
+	}
+	remove := []string{"/^UNSAFE_/"}
+
+	got := Remove(env, remove)
+	want := []string{
+		"HOME=/home/test",
+		"PATH=/usr/bin",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestFilter_InvalidRegexSkipped(t *testing.T) {
+	env := []string{
+		"HOME=/home/test",
+		"FOO=bar",
+	}
+	// Invalid regex pattern should be silently skipped.
+	keep := []string{"HOME", "/[invalid/"}
+	remove := []string{}
+
+	got := Filter(env, keep, remove)
+	want := []string{"HOME=/home/test"}
+	if !slices.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}

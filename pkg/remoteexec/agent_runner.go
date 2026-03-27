@@ -15,10 +15,11 @@ import (
 // AgentRunner executes remote commands by launching the mproxy-agent
 // binary on the remote host and communicating over CBOR mux.
 type AgentRunner struct {
-	Provider   SessionProvider
-	Transferer *agenttransfer.Transferer
-	Recorder   *agentproto.Recorder // nil disables recording
-	Log        *slog.Logger
+	Provider    SessionProvider
+	Transferer  *agenttransfer.Transferer
+	Recorder    *agentproto.Recorder // nil disables recording
+	AgentConfig *agentproto.AgentConfig // sent to agent before exec; nil skips
+	Log         *slog.Logger
 }
 
 func (r *AgentRunner) logger() *slog.Logger {
@@ -98,6 +99,16 @@ func (r *AgentRunner) Run(ctx context.Context, req Request, stdin io.Reader, std
 			mux.SetRecorder(r.Recorder, recSeq)
 		} else {
 			log.Warn("failed to write command start record", "error", recErr)
+		}
+	}
+
+	// Send agent config before exec so the agent can apply its own filtering.
+	if r.AgentConfig != nil {
+		if err := mux.Send(&agentproto.Frame{
+			Type:   agentproto.FrameConfig,
+			Config: r.AgentConfig,
+		}); err != nil {
+			return 127, fmt.Errorf("send config frame: %w", err)
 		}
 	}
 
@@ -249,6 +260,16 @@ func (r *AgentRunner) RunWithControl(ctx context.Context, req Request, ctrl *Con
 			mux.SetRecorder(r.Recorder, recSeq)
 		} else {
 			log.Warn("failed to write command start record", "error", recErr)
+		}
+	}
+
+	// Send agent config before exec so the agent can apply its own filtering.
+	if r.AgentConfig != nil {
+		if err := mux.Send(&agentproto.Frame{
+			Type:   agentproto.FrameConfig,
+			Config: r.AgentConfig,
+		}); err != nil {
+			return 127, fmt.Errorf("send config frame: %w", err)
 		}
 	}
 

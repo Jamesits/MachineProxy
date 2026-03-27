@@ -11,6 +11,7 @@ const (
 	FrameExit   FrameType = 5 // agent → local: child exited (terminal frame)
 	FrameError  FrameType = 6 // agent → local: internal error
 	FrameLog    FrameType = 7 // agent → local: log message
+	FrameConfig FrameType = 8 // local → agent: serialized config
 )
 
 // Frame is a single message on the CBOR mux. Fields are omitted when
@@ -22,8 +23,9 @@ type Frame struct {
 	Signal int       `cbor:"sig,omitempty"`
 	Code   int       `cbor:"c,omitempty"`
 	Error  string    `cbor:"e,omitempty"`
-	Exec   *ExecMsg  `cbor:"x,omitempty"`
-	Log    *LogEntry `cbor:"l,omitempty"`
+	Exec   *ExecMsg      `cbor:"x,omitempty"`
+	Log    *LogEntry     `cbor:"l,omitempty"`
+	Config *AgentConfig  `cbor:"cfg,omitempty"`
 }
 
 // LogEntry carries a structured log record from the agent.
@@ -31,6 +33,13 @@ type LogEntry struct {
 	Level int      `cbor:"lvl"`          // slog.Level value
 	Msg   string   `cbor:"msg"`
 	Attrs []string `cbor:"a,omitempty"` // key=value pairs
+}
+
+// AgentConfig carries the agent's runtime configuration, sent via FrameConfig
+// before any FrameExec. Patterns are globs or /regex/ delimited strings.
+type AgentConfig struct {
+	EnvKeep   []string `cbor:"env_keep"`
+	EnvRemove []string `cbor:"env_remove"`
 }
 
 // ExecMsg carries the command details in a FrameExec.

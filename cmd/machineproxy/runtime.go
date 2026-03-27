@@ -231,14 +231,18 @@ func (d *runtimeDeps) StartBroker(ctx context.Context) error {
 	}
 
 	brokerLog := d.log.With("component", "broker")
-	envKeep := d.cfg.Container.EnvKeep
-	envRemove := d.cfg.Container.EnvRemove
+	envKeep := d.cfg.Agent.EnvKeep
+	envRemove := d.cfg.Agent.EnvRemove
 	d.bkr = broker.NewServer(broker.Deps{
 		Remote: &remoteexec.AgentRunner{
 			Provider:   d.sshManager,
 			Transferer: transferer,
 			Recorder:   d.recorder,
-			Log:        d.log.With("component", "runner"),
+			AgentConfig: &agentproto.AgentConfig{
+				EnvKeep:   d.cfg.Agent.EnvKeep,
+				EnvRemove: d.cfg.Agent.EnvRemove,
+			},
+			Log: d.log.With("component", "runner"),
 		},
 		EnvFilter: func(env []string) []string {
 			return envfilter.Filter(env, envKeep, envRemove)
@@ -296,6 +300,9 @@ func (d *runtimeDeps) RunChild(ctx context.Context, cmdline []string) error {
 		d.brokerSocket,
 		shimBin,
 	)
+
+	// Strip env vars that should not leak into the container process.
+	env = envfilter.Remove(env, d.cfg.Container.EnvRemove)
 
 	// Parse the first mount entry for container path binding.
 	mount, _ := config.ParseMount(d.cfg.Container.Mounts[0])

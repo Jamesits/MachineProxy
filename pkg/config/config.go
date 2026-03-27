@@ -63,10 +63,14 @@ type Config struct {
 
 	Container struct {
 		LocalCommands []string `yaml:"local_commands"`
-		Mounts        []string `yaml:"mounts"`    // docker-compose style: [local:]remote
-		EnvKeep       []string `yaml:"env_keep"`   // glob patterns for inherited env vars to forward
-		EnvRemove     []string `yaml:"env_remove"` // glob patterns for env vars to always strip
+		Mounts        []string `yaml:"mounts"`     // docker-compose style: [local:]remote
+		EnvRemove     []string `yaml:"env_remove"`  // glob/regex patterns for env vars to strip from the container process
 	} `yaml:"container"`
+
+	Agent struct {
+		EnvKeep   []string `yaml:"env_keep"`   // glob/regex patterns for inherited env vars to forward to remote
+		EnvRemove []string `yaml:"env_remove"` // glob/regex patterns for env vars to always strip from remote
+	} `yaml:"agent"`
 
 	Components struct {
 		ShimPath       string `yaml:"shim_path"`
@@ -113,16 +117,21 @@ func (c *Config) applyDefaults() error {
 	if c.Components.AgentRemotePath == "" {
 		c.Components.AgentRemotePath = "/tmp/mproxy-agent"
 	}
-	if len(c.Container.EnvKeep) == 0 {
-		c.Container.EnvKeep = []string{
+	if len(c.Container.EnvRemove) == 0 {
+		c.Container.EnvRemove = []string{
+			"MPROXY_*",
+		}
+	}
+	if len(c.Agent.EnvKeep) == 0 {
+		c.Agent.EnvKeep = []string{
 			"HOME", "PATH", "TERM", "LANG", "LC_*",
 			"USER", "LOGNAME", "SHELL",
 			"EDITOR", "VISUAL", "PAGER",
 			"TZ", "DISPLAY", "SSH_AUTH_SOCK", "XDG_*",
 		}
 	}
-	if len(c.Container.EnvRemove) == 0 {
-		c.Container.EnvRemove = []string{
+	if len(c.Agent.EnvRemove) == 0 {
+		c.Agent.EnvRemove = []string{
 			"LD_PRELOAD", "LD_LIBRARY_PATH",
 			"MPROXY_*",
 		}
