@@ -10,7 +10,7 @@ Caution: this project is at a very early stage of development. **USE AT YOUR OWN
 ## Usage
 
 ```shell
-sudo MPROXY_HOOK_LIB="$(pwd)/hook/libmproxyhook.so" ./dist/machineproxy_linux_amd64_v1/machineproxy --config ./config.yaml claude
+machineproxy --config <./config.yaml> <program>
 ```
 
 ## Building
