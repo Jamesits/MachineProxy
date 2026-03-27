@@ -1,21 +1,25 @@
 package main
 
 import (
-	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 
+	"github.com/jamesits/machineproxy/pkg/logging"
 	"github.com/jamesits/machineproxy/pkg/tracer"
 )
 
 func main() {
-	cfg, childArgs := parseArgs(os.Args[1:])
+	cfg, childArgs, logLevel := parseArgs(os.Args[1:])
 	if cfg == nil || len(childArgs) == 0 {
-		fmt.Fprintf(os.Stderr, "usage: mproxy-tracer --shim-path PATH --broker-sock PATH [--whitelist PATH:PATH] -- CMD [ARGS...]\n")
+		slog.Error("usage: mproxy-tracer --shim-path PATH --broker-sock PATH [--whitelist PATH:PATH] [--log-level LEVEL] -- CMD [ARGS...]")
 		os.Exit(2)
 	}
+
+	log := logging.Setup(logLevel)
+	cfg.Log = log
 
 	t := tracer.New(*cfg)
 
@@ -25,10 +29,12 @@ func main() {
 	sigCh := make(chan os.Signal, 8)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGHUP)
 
+	log.Debug("starting tracer", "command", childArgs)
 	code, err := t.Start(childArgs, os.Environ(), func(childPid int) {
 		go func() {
 			for sig := range sigCh {
 				if s, ok := sig.(syscall.Signal); ok {
+					log.Log(nil, logging.LevelTrace, "forwarding signal to child", "signal", s, "pid", childPid)
 					_ = syscall.Kill(childPid, s)
 				}
 			}
@@ -37,45 +43,52 @@ func main() {
 	signal.Stop(sigCh)
 
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "mproxy-tracer: %v\n", err)
+		log.Error("tracer failed", "error", err)
 	}
 	os.Exit(code)
 }
 
-// parseArgs parses tracer flags before "--" and returns the config and the
-// remaining child command arguments.
-func parseArgs(args []string) (*tracer.Config, []string) {
+// parseArgs parses tracer flags before "--" and returns the config, the
+// remaining child command arguments, and the log level.
+func parseArgs(args []string) (*tracer.Config, []string, string) {
 	cfg := &tracer.Config{}
+	logLevel := "info"
 
 	i := 0
 	for i < len(args) {
 		switch args[i] {
 		case "--":
-			return cfg, args[i+1:]
+			return cfg, args[i+1:], logLevel
 		case "--shim-path":
 			if i+1 >= len(args) {
-				return nil, nil
+				return nil, nil, logLevel
 			}
 			i++
 			cfg.ShimPath = args[i]
 		case "--broker-sock":
 			if i+1 >= len(args) {
-				return nil, nil
+				return nil, nil, logLevel
 			}
 			i++
 			cfg.BrokerSock = args[i]
 		case "--whitelist":
 			if i+1 >= len(args) {
-				return nil, nil
+				return nil, nil, logLevel
 			}
 			i++
 			cfg.Whitelist = strings.Split(args[i], ":")
+		case "--log-level":
+			if i+1 >= len(args) {
+				return nil, nil, logLevel
+			}
+			i++
+			logLevel = args[i]
 		default:
 			// Treat first unrecognized arg as start of child command.
-			return cfg, args[i:]
+			return cfg, args[i:], logLevel
 		}
 		i++
 	}
 
-	return nil, nil
+	return nil, nil, logLevel
 }

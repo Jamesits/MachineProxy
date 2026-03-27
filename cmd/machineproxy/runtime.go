@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 	"github.com/jamesits/machineproxy/pkg/broker"
 	"github.com/jamesits/machineproxy/pkg/config"
 	"github.com/jamesits/machineproxy/pkg/envfilter"
+	"github.com/jamesits/machineproxy/pkg/logging"
 	"github.com/jamesits/machineproxy/pkg/ns"
 	"github.com/jamesits/machineproxy/pkg/remoteexec"
 	"github.com/jamesits/machineproxy/pkg/sshconn"
@@ -26,6 +28,7 @@ import (
 
 type runtimeDeps struct {
 	cfg *config.Config
+	log *slog.Logger
 
 	sshManager   *sshconn.Manager
 	namespace    *ns.Namespace
@@ -37,7 +40,8 @@ type runtimeDeps struct {
 	brokerCtxCancel context.CancelFunc
 }
 
-func newRuntimeDeps(cfg *config.Config) (*runtimeDeps, error) {
+func newRuntimeDeps(cfg *config.Config, log *slog.Logger) (*runtimeDeps, error) {
+	sshLog := log.With("component", "ssh")
 	dial, err := sshconn.NewDialFunc(sshconn.DialConfig{
 		Addr:           cfg.SSH.Addr,
 		User:           cfg.SSH.User,
@@ -51,37 +55,49 @@ func newRuntimeDeps(cfg *config.Config) (*runtimeDeps, error) {
 
 	return &runtimeDeps{
 		cfg: cfg,
+		log: log,
 		sshManager: sshconn.NewManager(sshconn.Options{
 			Dial:              dial,
 			ReconnectInterval: time.Second,
 			KeepAliveInterval: cfg.SSH.KeepAlive,
+			Log:               sshLog,
 		}),
-		namespace: ns.New(ns.Deps{}),
+		namespace: ns.New(ns.Deps{Log: log.With("component", "ns")}),
 	}, nil
 }
 
 func (d *runtimeDeps) Close() {
+	d.log.Debug("shutting down")
 	if d.recorder != nil {
-		_ = d.recorder.Close()
+		if err := d.recorder.Close(); err != nil {
+			d.log.Warn("failed to close recorder", "error", err)
+		}
 	}
 	if d.brokerCtxCancel != nil {
 		d.brokerCtxCancel()
 	}
 	if d.fuseServer != nil {
-		_ = d.fuseServer.Unmount()
+		if err := d.fuseServer.Unmount(); err != nil {
+			d.log.Warn("failed to unmount fuse", "error", err)
+		}
 		d.fuseServer = nil
 	}
 	if d.fuseMountDir != "" {
-		_ = os.RemoveAll(d.fuseMountDir)
+		if err := os.RemoveAll(d.fuseMountDir); err != nil {
+			d.log.Warn("failed to remove fuse mount dir", "error", err)
+		}
 		d.fuseMountDir = ""
 	}
 	d.namespace.Leave()
 	if d.sshManager != nil {
-		_ = d.sshManager.Close()
+		if err := d.sshManager.Close(); err != nil {
+			d.log.Warn("failed to close ssh manager", "error", err)
+		}
 	}
 }
 
 func (d *runtimeDeps) StartSSH(ctx context.Context) error {
+	d.log.Log(ctx, logging.LevelTrace, "starting ssh manager", "addr", d.cfg.SSH.Addr, "user", d.cfg.SSH.User)
 	if err := d.sshManager.Start(ctx); err != nil {
 		return err
 	}
@@ -93,6 +109,7 @@ func (d *runtimeDeps) StartSSH(ctx context.Context) error {
 
 	for {
 		if d.sshManager.IsConnected() {
+			d.log.Debug("ssh connected", "addr", d.cfg.SSH.Addr)
 			return nil
 		}
 		select {
@@ -109,10 +126,16 @@ func (d *runtimeDeps) StartSSH(ctx context.Context) error {
 }
 
 func (d *runtimeDeps) EnterNamespace(ctx context.Context) error {
-	return d.namespace.Prepare(ctx)
+	d.log.Log(ctx, logging.LevelTrace, "preparing namespace")
+	if err := d.namespace.Prepare(ctx); err != nil {
+		return err
+	}
+	d.log.Debug("namespace ready")
+	return nil
 }
 
 func (d *runtimeDeps) MountWorkspace(ctx context.Context) error {
+	d.log.Log(ctx, logging.LevelTrace, "mounting workspace", "remote_path", d.cfg.Workspace.RemotePath)
 	tmpDir, err := os.MkdirTemp("", "machineproxy-fuse-*")
 	if err != nil {
 		return fmt.Errorf("create temp mountpoint: %w", err)
@@ -125,16 +148,19 @@ func (d *runtimeDeps) MountWorkspace(ctx context.Context) error {
 		return fmt.Errorf("ssh sftp client is not *sftp.Client")
 	}
 
-	backend := workspacefs.New(&workspacefs.SFTPAdapter{C: sftpClient}, d.cfg.Workspace.RemotePath)
+	fsLog := d.log.With("component", "fuse")
+	backend := workspacefs.New(&workspacefs.SFTPAdapter{C: sftpClient}, d.cfg.Workspace.RemotePath, fsLog)
 	server, err := workspacefs.Mount(ctx, backend, d.fuseMountDir)
 	if err != nil {
 		return fmt.Errorf("mount workspace fuse: %w", err)
 	}
 	d.fuseServer = server
+	d.log.Debug("workspace mounted", "mount_dir", tmpDir, "remote_path", d.cfg.Workspace.RemotePath)
 	return nil
 }
 
 func (d *runtimeDeps) StartBroker(ctx context.Context) error {
+	d.log.Log(ctx, logging.LevelTrace, "starting broker", "socket", d.cfg.Broker.SocketPath)
 	if err := os.MkdirAll(filepath.Dir(d.cfg.Broker.SocketPath), 0o755); err != nil {
 		return fmt.Errorf("create broker socket dir: %w", err)
 	}
@@ -143,6 +169,7 @@ func (d *runtimeDeps) StartBroker(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("resolve agent binary: %w", err)
 	}
+	d.log.Log(ctx, logging.LevelTrace, "resolved agent binary", "path", agentLocalPath)
 
 	sftpRaw := d.sshManager.SFTP()
 	sftpClient, ok := sftpRaw.(*sftp.Client)
@@ -154,6 +181,7 @@ func (d *runtimeDeps) StartBroker(ctx context.Context) error {
 		func() *sftp.Client { return sftpClient },
 		agentLocalPath,
 		d.cfg.Agent.RemotePath,
+		d.log.With("component", "transfer"),
 	)
 
 	// Set up session recording if configured.
@@ -168,7 +196,7 @@ func (d *runtimeDeps) StartBroker(ctx context.Context) error {
 		if u, uErr := currentUsername(); uErr == nil {
 			username = u
 		}
-		_ = rec.WriteSessionHeader(&agentproto.SessionHeader{
+		if err := rec.WriteSessionHeader(&agentproto.SessionHeader{
 			Version:   version,
 			StartTime: time.Now().UnixNano(),
 			LocalUser: username,
@@ -176,9 +204,12 @@ func (d *runtimeDeps) StartBroker(ctx context.Context) error {
 			SSHAddr:   d.cfg.SSH.Addr,
 			SSHUser:   d.cfg.SSH.User,
 			AgentPath: d.cfg.Agent.RemotePath,
-		})
+		}); err != nil {
+			d.log.Warn("failed to write session header", "error", err)
+		}
 	}
 
+	brokerLog := d.log.With("component", "broker")
 	envKeep := d.cfg.Exec.EnvKeep
 	envRemove := d.cfg.Exec.EnvRemove
 	d.bkr = broker.NewServer(broker.Deps{
@@ -186,16 +217,20 @@ func (d *runtimeDeps) StartBroker(ctx context.Context) error {
 			Provider:   d.sshManager,
 			Transferer: transferer,
 			Recorder:   d.recorder,
+			Log:        d.log.With("component", "runner"),
 		},
 		EnvFilter: func(env []string) []string {
 			return envfilter.Filter(env, envKeep, envRemove)
 		},
+		Log: brokerLog,
 	})
 	bctx, cancel := context.WithCancel(ctx)
 	d.brokerCtxCancel = cancel
 
 	go func() {
-		_ = d.bkr.Start(bctx, d.cfg.Broker.SocketPath)
+		if err := d.bkr.Start(bctx, d.cfg.Broker.SocketPath); err != nil {
+			d.log.Warn("broker stopped with error", "error", err)
+		}
 	}()
 
 	timeout := time.NewTimer(2 * time.Second)
@@ -205,6 +240,7 @@ func (d *runtimeDeps) StartBroker(ctx context.Context) error {
 
 	for {
 		if _, err := os.Stat(d.cfg.Broker.SocketPath); err == nil {
+			d.log.Debug("broker ready", "socket", d.cfg.Broker.SocketPath)
 			return nil
 		}
 		select {
@@ -226,6 +262,7 @@ func (d *runtimeDeps) RunChild(ctx context.Context, cmdline []string) error {
 	if err != nil {
 		return err
 	}
+	d.log.Log(ctx, logging.LevelTrace, "resolved tracer binary", "path", tracerBin)
 
 	env := ns.FormatEnv(
 		os.Environ(),
@@ -239,6 +276,7 @@ func (d *runtimeDeps) RunChild(ctx context.Context, cmdline []string) error {
 		tracerBin,
 		"--shim-path", d.cfg.Exec.ShimPath,
 		"--broker-sock", d.cfg.Broker.SocketPath,
+		"--log-level", d.cfg.LogLevel,
 	}
 	if len(d.cfg.Exec.LocalCommands) > 0 {
 		tracerArgs = append(tracerArgs, "--whitelist", strings.Join(d.cfg.Exec.LocalCommands, ":"))
@@ -246,6 +284,7 @@ func (d *runtimeDeps) RunChild(ctx context.Context, cmdline []string) error {
 	tracerArgs = append(tracerArgs, "--")
 	tracerArgs = append(tracerArgs, cmdline...)
 
+	d.log.Log(ctx, logging.LevelTrace, "launching child via tracer", "tracer", tracerBin, "command", cmdline)
 	return d.namespace.Run(ctx, d.fuseMountDir, d.cfg.Workspace.RemotePath, tracerArgs, env)
 }
 

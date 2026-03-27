@@ -37,6 +37,7 @@ type Mux struct {
 	onSignal func(int)
 	onExit   func(code int, errStr string)
 	onError  func(errStr string)
+	onLog    func(*LogEntry)
 
 	recorder  *Recorder
 	recSeqNum uint32
@@ -71,6 +72,9 @@ func (m *Mux) OnExit(fn func(code int, errStr string)) { m.onExit = fn }
 
 // OnError sets the callback for FrameError messages.
 func (m *Mux) OnError(fn func(errStr string)) { m.onError = fn }
+
+// OnLog sets the callback for FrameLog messages (agent log forwarding).
+func (m *Mux) OnLog(fn func(*LogEntry)) { m.onLog = fn }
 
 // SetRecorder enables recording of all frames passing through this mux.
 // seq is the command sequence number assigned by the Recorder.
@@ -161,6 +165,11 @@ func (m *Mux) ReadLoop(ctx context.Context) (exitCode int, err error) {
 		case FrameError:
 			if m.onError != nil {
 				m.onError(f.Error)
+			}
+
+		case FrameLog:
+			if m.onLog != nil && f.Log != nil {
+				m.onLog(f.Log)
 			}
 		}
 	}

@@ -18,7 +18,7 @@ func TestReadFileDelegatesToSFTP(t *testing.T) {
 		},
 	}
 
-	fs := New(client, "/workspace")
+	fs := New(client, "/workspace", nil)
 	data, errno := fs.ReadFile(context.Background(), "hello.txt", 0, 5)
 
 	if errno != 0 {
@@ -34,7 +34,7 @@ func TestReadFileDelegatesToSFTP(t *testing.T) {
 
 func TestReadFileMissingReturnsENOENT(t *testing.T) {
 	client := &fakeSFTPClient{files: map[string][]byte{}}
-	fs := New(client, "/workspace")
+	fs := New(client, "/workspace", nil)
 
 	_, errno := fs.ReadFile(context.Background(), "missing.txt", 0, 128)
 	if errno != syscall.ENOENT {
@@ -49,7 +49,7 @@ func TestWriteFileDelegatesToSFTP(t *testing.T) {
 		},
 	}
 
-	fs := New(client, "/workspace")
+	fs := New(client, "/workspace", nil)
 	n, errno := fs.WriteFile(context.Background(), "out.txt", []byte("written"), 0)
 
 	if errno != 0 {
@@ -65,7 +65,7 @@ func TestWriteFileDelegatesToSFTP(t *testing.T) {
 
 func TestCreateFileDelegatesToSFTP(t *testing.T) {
 	client := &fakeSFTPClient{files: map[string][]byte{}}
-	fs := New(client, "/workspace")
+	fs := New(client, "/workspace", nil)
 
 	errno := fs.CreateFile(context.Background(), "new.txt")
 	if errno != 0 {
@@ -81,7 +81,7 @@ func TestMkDirDelegatesToSFTP(t *testing.T) {
 		files: map[string][]byte{},
 		dirs:  map[string]bool{},
 	}
-	fs := New(client, "/workspace")
+	fs := New(client, "/workspace", nil)
 
 	errno := fs.MkDir(context.Background(), "subdir")
 	if errno != 0 {

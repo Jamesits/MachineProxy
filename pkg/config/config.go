@@ -12,6 +12,8 @@ import (
 
 // Config describes machineproxy runtime behavior.
 type Config struct {
+	LogLevel string `yaml:"log_level"` // trace, debug, info, warn, error
+
 	SSH struct {
 		Addr           string        `yaml:"addr"`
 		User           string        `yaml:"user"`
@@ -64,6 +66,9 @@ func Load(r io.Reader) (*Config, error) {
 }
 
 func (c *Config) applyDefaults() error {
+	if c.LogLevel == "" {
+		c.LogLevel = "info"
+	}
 	if c.SSH.KeepAlive == 0 {
 		c.SSH.KeepAlive = 20 * time.Second
 	}
@@ -101,6 +106,11 @@ func (c *Config) applyDefaults() error {
 }
 
 func (c *Config) Validate() error {
+	switch c.LogLevel {
+	case "trace", "debug", "info", "warn", "error":
+	default:
+		return fmt.Errorf("log_level must be one of trace, debug, info, warn, error; got %q", c.LogLevel)
+	}
 	if c.SSH.Addr == "" {
 		return errors.New("ssh.addr is required")
 	}

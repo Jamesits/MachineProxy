@@ -9,6 +9,7 @@ import (
 	"os/exec"
 
 	"github.com/jamesits/machineproxy/pkg/config"
+	"github.com/jamesits/machineproxy/pkg/logging"
 	"github.com/jamesits/machineproxy/pkg/supervisor"
 )
 
@@ -50,11 +51,16 @@ func run() error {
 		return fmt.Errorf("load config %q: %w", cfgPath, err)
 	}
 
+	log := logging.Setup(cfg.LogLevel)
+	log.Debug("config loaded", "path", cfgPath, "version", version)
+
 	if flag.NArg() == 0 {
 		return fmt.Errorf("missing command to run")
 	}
 
-	deps, err := newRuntimeDeps(cfg)
+	log.Debug("starting machineproxy", "command", flag.Args())
+
+	deps, err := newRuntimeDeps(cfg, log)
 	if err != nil {
 		return err
 	}
@@ -66,6 +72,7 @@ func run() error {
 		FS:       deps,
 		Broker:   deps,
 		Launcher: deps,
+		Log:      log,
 	})
 
 	return sup.Run(context.Background(), flag.Args())

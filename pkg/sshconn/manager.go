@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/jamesits/machineproxy/pkg/logging"
 )
 
 // SFTPClient is a minimal close-able interface used by the connection manager.
@@ -36,6 +39,7 @@ type Options struct {
 	Dial              func(ctx context.Context) (Conn, error)
 	ReconnectInterval time.Duration
 	KeepAliveInterval time.Duration
+	Log               *slog.Logger
 }
 
 type Manager struct {
@@ -43,6 +47,7 @@ type Manager struct {
 	conn    Conn
 	sftp    SFTPClient
 	opts    Options
+	log     *slog.Logger
 	started bool
 	lastErr error
 }
@@ -54,7 +59,11 @@ func NewManager(opts Options) *Manager {
 	if opts.KeepAliveInterval < 0 {
 		opts.KeepAliveInterval = 0
 	}
-	return &Manager{opts: opts}
+	log := opts.Log
+	if log == nil {
+		log = slog.Default()
+	}
+	return &Manager{opts: opts, log: log}
 }
 
 func (m *Manager) Start(ctx context.Context) error {
@@ -138,20 +147,33 @@ func (m *Manager) run(ctx context.Context) {
 
 	for {
 		if !m.IsConnected() {
-			_ = m.reconnect(ctx)
+			m.log.Debug("ssh disconnected, reconnecting")
+			if err := m.reconnect(ctx); err != nil {
+				m.log.Warn("ssh reconnect failed", "error", err)
+			}
 		}
 
 		select {
 		case <-ctx.Done():
-			_ = m.Close()
+			if err := m.Close(); err != nil {
+				m.log.Warn("ssh close on shutdown", "error", err)
+			}
 			return
 		case <-reconnectTicker.C:
 			if !m.IsConnected() {
-				_ = m.reconnect(ctx)
+				m.log.Debug("ssh reconnect tick")
+				if err := m.reconnect(ctx); err != nil {
+					m.log.Warn("ssh reconnect failed", "error", err)
+				}
 			}
 		case <-m.keepaliveChan(keepaliveTicker):
 			if err := m.sendKeepAlive(ctx); err != nil {
-				_ = m.Close()
+				m.log.Warn("ssh keepalive failed, closing connection", "error", err)
+				if closeErr := m.Close(); closeErr != nil {
+					m.log.Warn("ssh close after keepalive failure", "error", closeErr)
+				}
+			} else {
+				m.log.Log(ctx, logging.LevelTrace, "ssh keepalive sent")
 			}
 		}
 	}
@@ -165,6 +187,7 @@ func (m *Manager) keepaliveChan(t *time.Ticker) <-chan time.Time {
 }
 
 func (m *Manager) reconnect(ctx context.Context) error {
+	m.log.Log(ctx, logging.LevelTrace, "dialing ssh")
 	conn, err := m.opts.Dial(ctx)
 	if err != nil {
 		m.mu.Lock()
@@ -188,6 +211,7 @@ func (m *Manager) reconnect(ctx context.Context) error {
 	m.lastErr = nil
 	m.mu.Unlock()
 
+	m.log.Debug("ssh connected")
 	return nil
 }
 

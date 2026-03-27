@@ -2,20 +2,25 @@ package ns
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"os/exec"
+
+	"github.com/jamesits/machineproxy/pkg/logging"
 )
 
 // Deps allows dependency injection for testing.
 type Deps struct {
 	// LookPath resolves the bwrap binary. Defaults to exec.LookPath.
 	LookPath func(file string) (string, error)
+	Log      *slog.Logger
 }
 
 // Namespace builds and executes a bubblewrap (bwrap) sandbox that
 // bind-mounts the host filesystem and overlays a FUSE-backed workspace.
 type Namespace struct {
 	deps     Deps
+	log      *slog.Logger
 	bwrapBin string
 }
 
@@ -24,7 +29,11 @@ func New(deps Deps) *Namespace {
 	if deps.LookPath == nil {
 		deps.LookPath = exec.LookPath
 	}
-	return &Namespace{deps: deps}
+	log := deps.Log
+	if log == nil {
+		log = slog.Default()
+	}
+	return &Namespace{deps: deps, log: log}
 }
 
 // Prepare locates the bwrap binary. Must be called before Run.
@@ -49,6 +58,9 @@ func (n *Namespace) Run(ctx context.Context, fuseMountDir, containerPath string,
 		"--die-with-parent",
 	}
 	args = append(args, cmdline...)
+
+	n.log.Debug("running in namespace", "bwrap", n.bwrapBin, "container_path", containerPath)
+	n.log.Log(ctx, logging.LevelTrace, "bwrap full args", "args", args)
 
 	cmd := exec.CommandContext(ctx, n.bwrapBin, args...)
 	cmd.Stdin = os.Stdin

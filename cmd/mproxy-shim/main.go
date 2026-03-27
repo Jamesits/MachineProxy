@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"os"
 	"os/signal"
@@ -21,19 +22,28 @@ func main() {
 }
 
 func Run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
+	// Shim is performance-sensitive; only log errors to stderr.
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelError,
+	}))
+
 	if len(args) < 2 {
+		log.Error("missing arguments")
 		return 127
 	}
 
 	socketPath := os.Getenv("MPROXY_BROKER_SOCK")
 	if socketPath == "" {
+		log.Error("MPROXY_BROKER_SOCK not set")
 		return 127
 	}
 
 	conn, err := net.Dial("unix", socketPath)
 	if err != nil {
 		if errors.Is(err, os.ErrPermission) {
-			fmt.Fprintf(stderr, "mproxy-shim: %s: permission denied (stale socket?)\n", socketPath)
+			log.Error("broker socket permission denied (stale socket?)", "path", socketPath)
+		} else {
+			log.Error("failed to connect to broker", "path", socketPath, "error", err)
 		}
 		return 127
 	}

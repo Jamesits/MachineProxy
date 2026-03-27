@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"sync"
 
 	"github.com/jamesits/machineproxy/pkg/agentproto"
 	"github.com/jamesits/machineproxy/pkg/agenttransfer"
+	"github.com/jamesits/machineproxy/pkg/logging"
 )
 
 // AgentRunner executes remote commands by launching the mproxy-agent
@@ -16,9 +18,18 @@ type AgentRunner struct {
 	Provider   SessionProvider
 	Transferer *agenttransfer.Transferer
 	Recorder   *agentproto.Recorder // nil disables recording
+	Log        *slog.Logger
+}
+
+func (r *AgentRunner) logger() *slog.Logger {
+	if r.Log != nil {
+		return r.Log
+	}
+	return slog.Default()
 }
 
 func (r *AgentRunner) Run(ctx context.Context, req Request, stdin io.Reader, stdout io.Writer, stderr io.Writer) (int, error) {
+	log := r.logger()
 	if r == nil || r.Provider == nil {
 		return 127, fmt.Errorf("agent runner provider is nil")
 	}
@@ -28,6 +39,7 @@ func (r *AgentRunner) Run(ctx context.Context, req Request, stdin io.Reader, std
 		return 127, fmt.Errorf("ensure agent binary: %w", err)
 	}
 
+	log.Debug("opening ssh session for agent")
 	session, err := r.Provider.NewSession(ctx)
 	if err != nil {
 		return 127, err
@@ -50,6 +62,7 @@ func (r *AgentRunner) Run(ctx context.Context, req Request, stdin io.Reader, std
 	if err := session.Start(shellQuote(agentPath)); err != nil {
 		return 127, fmt.Errorf("start agent: %w", err)
 	}
+	log.Debug("agent started", "agent_path", agentPath)
 
 	// Drain agent diagnostic output (its stderr) to our stderr.
 	go func() {
@@ -57,6 +70,16 @@ func (r *AgentRunner) Run(ctx context.Context, req Request, stdin io.Reader, std
 	}()
 
 	mux := agentproto.NewMux(sessOut, sessIn)
+
+	// Forward agent log frames to our local logger.
+	mux.OnLog(func(entry *agentproto.LogEntry) {
+		attrs := make([]any, 0, len(entry.Attrs)*2+2)
+		attrs = append(attrs, "source", "agent")
+		for _, kv := range entry.Attrs {
+			attrs = append(attrs, kv)
+		}
+		log.Log(ctx, slog.Level(entry.Level), entry.Msg, attrs...)
+	})
 
 	// Send exec request.
 	execMsg := &agentproto.ExecMsg{
@@ -73,9 +96,12 @@ func (r *AgentRunner) Run(ctx context.Context, req Request, stdin io.Reader, std
 		recSeq, recErr = r.Recorder.WriteCommandStart(execMsg)
 		if recErr == nil {
 			mux.SetRecorder(r.Recorder, recSeq)
+		} else {
+			log.Warn("failed to write command start record", "error", recErr)
 		}
 	}
 
+	log.Log(ctx, logging.LevelTrace, "sending exec frame", "path", req.Path, "argv", req.Argv)
 	if err := mux.Send(&agentproto.Frame{
 		Type: agentproto.FrameExec,
 		Exec: execMsg,
@@ -97,6 +123,7 @@ func (r *AgentRunner) Run(ctx context.Context, req Request, stdin io.Reader, std
 
 	// Run the mux read loop. It returns when the agent sends FrameExit.
 	exitCode, muxErr := mux.ReadLoop(ctx)
+	log.Log(ctx, logging.LevelTrace, "mux read loop finished", "exit_code", exitCode, "error", muxErr)
 
 	// Close the session stdin to signal the agent that we're done.
 	_ = sessIn.Close()
@@ -108,10 +135,14 @@ func (r *AgentRunner) Run(ctx context.Context, req Request, stdin io.Reader, std
 	stdinWG.Wait()
 
 	// Wait for the SSH session to finish.
-	_ = session.Wait()
+	if err := session.Wait(); err != nil {
+		log.Warn("ssh session wait error", "error", err)
+	}
 
 	if r.Recorder != nil {
-		_ = r.Recorder.WriteCommandEnd(recSeq, exitCode)
+		if err := r.Recorder.WriteCommandEnd(recSeq, exitCode); err != nil {
+			log.Warn("failed to write command end record", "error", err)
+		}
 	}
 
 	if muxErr != nil && exitCode < 0 {
@@ -148,6 +179,7 @@ func (nopWriteCloser) Close() error { return nil }
 
 // RunWithControl extends Run with signal forwarding and extra fd bridging.
 func (r *AgentRunner) RunWithControl(ctx context.Context, req Request, ctrl *Control) (int, error) {
+	log := r.logger()
 	if r == nil || r.Provider == nil {
 		return 127, fmt.Errorf("agent runner provider is nil")
 	}
@@ -157,6 +189,7 @@ func (r *AgentRunner) RunWithControl(ctx context.Context, req Request, ctrl *Con
 		return 127, fmt.Errorf("ensure agent binary: %w", err)
 	}
 
+	log.Debug("opening ssh session for agent (with control)")
 	session, err := r.Provider.NewSession(ctx)
 	if err != nil {
 		return 127, err
@@ -179,6 +212,7 @@ func (r *AgentRunner) RunWithControl(ctx context.Context, req Request, ctrl *Con
 	if err := session.Start(shellQuote(agentPath)); err != nil {
 		return 127, fmt.Errorf("start agent: %w", err)
 	}
+	log.Debug("agent started (with control)", "agent_path", agentPath)
 
 	// Drain agent diagnostics.
 	go func() {
@@ -186,6 +220,16 @@ func (r *AgentRunner) RunWithControl(ctx context.Context, req Request, ctrl *Con
 	}()
 
 	mux := agentproto.NewMux(sessOut, sessIn)
+
+	// Forward agent log frames to our local logger.
+	mux.OnLog(func(entry *agentproto.LogEntry) {
+		attrs := make([]any, 0, len(entry.Attrs)*2+2)
+		attrs = append(attrs, "source", "agent")
+		for _, kv := range entry.Attrs {
+			attrs = append(attrs, kv)
+		}
+		log.Log(ctx, slog.Level(entry.Level), entry.Msg, attrs...)
+	})
 
 	// Build exec message with extra fds.
 	execMsg := &agentproto.ExecMsg{
@@ -203,9 +247,12 @@ func (r *AgentRunner) RunWithControl(ctx context.Context, req Request, ctrl *Con
 		recSeq, recErr = r.Recorder.WriteCommandStart(execMsg)
 		if recErr == nil {
 			mux.SetRecorder(r.Recorder, recSeq)
+		} else {
+			log.Warn("failed to write command start record", "error", recErr)
 		}
 	}
 
+	log.Log(ctx, logging.LevelTrace, "sending exec frame (with control)", "path", req.Path, "argv", req.Argv, "extra_fds", req.ExtraFDs)
 	if err := mux.Send(&agentproto.Frame{
 		Type: agentproto.FrameExec,
 		Exec: execMsg,
@@ -244,6 +291,7 @@ func (r *AgentRunner) RunWithControl(ctx context.Context, req Request, ctrl *Con
 	if ctrl.Signals != nil {
 		go func() {
 			for sig := range ctrl.Signals {
+				log.Log(ctx, logging.LevelTrace, "forwarding signal to agent", "signal", sig)
 				_ = mux.Send(&agentproto.Frame{
 					Type:   agentproto.FrameSignal,
 					Signal: sig,
@@ -253,10 +301,9 @@ func (r *AgentRunner) RunWithControl(ctx context.Context, req Request, ctrl *Con
 	}
 
 	exitCode, muxErr := mux.ReadLoop(ctx)
+	log.Log(ctx, logging.LevelTrace, "mux read loop finished (with control)", "exit_code", exitCode, "error", muxErr)
 
 	_ = sessIn.Close()
-	// Unblock bridge goroutines: close stdin and extra FD readers so
-	// bridgeReaderToMux's Read returns instead of blocking forever.
 	if c, ok := ctrl.Stdin.(io.Closer); ok {
 		_ = c.Close()
 	}
@@ -264,10 +311,14 @@ func (r *AgentRunner) RunWithControl(ctx context.Context, req Request, ctrl *Con
 		_ = rwc.Close()
 	}
 	bridgeWG.Wait()
-	_ = session.Wait()
+	if err := session.Wait(); err != nil {
+		log.Warn("ssh session wait error", "error", err)
+	}
 
 	if r.Recorder != nil {
-		_ = r.Recorder.WriteCommandEnd(recSeq, exitCode)
+		if err := r.Recorder.WriteCommandEnd(recSeq, exitCode); err != nil {
+			log.Warn("failed to write command end record", "error", err)
+		}
 	}
 
 	if muxErr != nil && exitCode < 0 {

@@ -10,6 +10,7 @@ const (
 	FrameSignal FrameType = 4 // local → agent: deliver signal to child pgid
 	FrameExit   FrameType = 5 // agent → local: child exited (terminal frame)
 	FrameError  FrameType = 6 // agent → local: internal error
+	FrameLog    FrameType = 7 // agent → local: log message
 )
 
 // Frame is a single message on the CBOR mux. Fields are omitted when
@@ -22,6 +23,14 @@ type Frame struct {
 	Code   int       `cbor:"c,omitempty"`
 	Error  string    `cbor:"e,omitempty"`
 	Exec   *ExecMsg  `cbor:"x,omitempty"`
+	Log    *LogEntry `cbor:"l,omitempty"`
+}
+
+// LogEntry carries a structured log record from the agent.
+type LogEntry struct {
+	Level int      `cbor:"lvl"`          // slog.Level value
+	Msg   string   `cbor:"msg"`
+	Attrs []string `cbor:"a,omitempty"` // key=value pairs
 }
 
 // ExecMsg carries the command details in a FrameExec.

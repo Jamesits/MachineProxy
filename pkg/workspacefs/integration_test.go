@@ -59,7 +59,7 @@ func testFS(t *testing.T) *FileSystem {
 		cleanupDir(sftpClient, testDir)
 	})
 
-	return New(&SFTPAdapter{C: sftpClient}, testDir)
+	return New(&SFTPAdapter{C: sftpClient}, testDir, nil)
 }
 
 func cleanupDir(c *sftp.Client, dir string) {

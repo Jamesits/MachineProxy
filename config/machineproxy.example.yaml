@@ -1,3 +1,6 @@
+# Log verbosity: trace, debug, info, warn, error
+log_level: info
+
 ssh:
   addr: remote.server.example.com:22
   user: dev
@@ -12,6 +15,7 @@ exec:
   local_commands:
     - /usr/bin/env
   shim_path: /opt/machineproxy/mproxy-shim
+  tracer_path: /opt/machineproxy/mproxy-tracer
 
   # Env vars added or changed by the parent process (after the hook loaded)
   # are always forwarded. For inherited (unchanged) vars, only those matching

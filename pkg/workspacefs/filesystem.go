@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"os"
 	"path"
 	"strings"
 	"syscall"
+
+	"github.com/jamesits/machineproxy/pkg/logging"
 )
 
 type RemoteFile interface {
@@ -37,14 +40,18 @@ type SFTPClient interface {
 type FileSystem struct {
 	root string
 	sftp SFTPClient
+	log  *slog.Logger
 }
 
-func New(sftp SFTPClient, root string) *FileSystem {
+func New(sftp SFTPClient, root string, log *slog.Logger) *FileSystem {
 	cleanRoot := path.Clean(root)
 	if cleanRoot == "." {
 		cleanRoot = "/"
 	}
-	return &FileSystem{root: cleanRoot, sftp: sftp}
+	if log == nil {
+		log = slog.Default()
+	}
+	return &FileSystem{root: cleanRoot, sftp: sftp, log: log}
 }
 
 func (f *FileSystem) Root() string {
@@ -52,11 +59,12 @@ func (f *FileSystem) Root() string {
 }
 
 func (f *FileSystem) ReadFile(ctx context.Context, rel string, off int64, size int) ([]byte, syscall.Errno) {
-	_ = ctx
+	f.log.Log(ctx, logging.LevelTrace, "fuse read", "path", rel, "offset", off, "size", size)
 
 	abs := f.absPath(rel)
 	fh, err := f.sftp.Open(abs)
 	if err != nil {
+		f.log.Warn("fuse read open failed", "path", rel, "error", err)
 		return nil, toErrno(err)
 	}
 	defer fh.Close()
@@ -68,6 +76,7 @@ func (f *FileSystem) ReadFile(ctx context.Context, rel string, off int64, size i
 	buf := make([]byte, size)
 	n, err := fh.ReadAt(buf, off)
 	if err != nil && !errors.Is(err, io.EOF) {
+		f.log.Warn("fuse read failed", "path", rel, "error", err)
 		return nil, toErrno(err)
 	}
 	return buf[:n], 0
@@ -90,15 +99,17 @@ func (f *FileSystem) ReadDir(rel string) ([]os.FileInfo, syscall.Errno) {
 }
 
 func (f *FileSystem) WriteFile(ctx context.Context, rel string, data []byte, off int64) (uint32, syscall.Errno) {
-	_ = ctx
+	f.log.Log(ctx, logging.LevelTrace, "fuse write", "path", rel, "offset", off, "size", len(data))
 	abs := f.absPath(rel)
 	fh, err := f.sftp.OpenFile(abs, os.O_WRONLY)
 	if err != nil {
+		f.log.Warn("fuse write open failed", "path", rel, "error", err)
 		return 0, toErrno(err)
 	}
 	defer fh.Close()
 	n, err := fh.WriteAt(data, off)
 	if err != nil {
+		f.log.Warn("fuse write failed", "path", rel, "error", err)
 		return uint32(n), toErrno(err)
 	}
 	return uint32(n), 0

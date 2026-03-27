@@ -2,12 +2,13 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"log/slog"
 	"os"
 	"sync"
 	"syscall"
 
 	"github.com/jamesits/machineproxy/pkg/agentproto"
+	"github.com/jamesits/machineproxy/pkg/logging"
 )
 
 func main() {
@@ -15,9 +16,14 @@ func main() {
 }
 
 func run() int {
+	// Bootstrap logger writes to stderr until the mux is ready.
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: logging.LevelTrace,
+	}))
+
 	// Become a subreaper so orphaned grandchildren are reparented to us.
 	if _, _, errno := syscall.RawSyscall(syscall.SYS_PRCTL, 36 /* PR_SET_CHILD_SUBREAPER */, 1, 0); errno != 0 {
-		fmt.Fprintf(os.Stderr, "mproxy-agent: prctl(PR_SET_CHILD_SUBREAPER): %v\n", errno)
+		log.Warn("prctl(PR_SET_CHILD_SUBREAPER) failed", "error", errno)
 		// Non-fatal: zombie reaping still works for direct children.
 	}
 
@@ -30,20 +36,26 @@ func run() int {
 	// Our stderr goes to the SSH session's stderr channel for diagnostics.
 	mux := agentproto.NewMux(os.Stdin, os.Stdout)
 
+	// Switch to mux-backed logger so logs are forwarded to machineproxy.
+	log = slog.New(agentproto.NewMuxLogHandler(mux, logging.LevelTrace))
+	slog.SetDefault(log)
+
 	// Read the first frame through the mux's decoder — must be FrameExec.
 	f, err := mux.DecodeOne()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "mproxy-agent: reading exec frame: %v\n", err)
+		log.Error("reading exec frame failed", "error", err)
 		return 127
 	}
 	if f.Type != agentproto.FrameExec || f.Exec == nil {
-		fmt.Fprintf(os.Stderr, "mproxy-agent: first frame must be exec, got type %d\n", f.Type)
+		log.Error("first frame must be exec", "type", f.Type)
 		return 127
 	}
 
+	log.Log(ctx, logging.LevelTrace, "building command", "path", f.Exec.Path, "argv", f.Exec.Argv, "cwd", f.Exec.Cwd)
+
 	cmd, pipes, err := buildCmd(f.Exec)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "mproxy-agent: build command: %v\n", err)
+		log.Error("build command failed", "error", err)
 		_ = mux.Send(&agentproto.Frame{
 			Type:  agentproto.FrameExit,
 			Code:  127,
@@ -54,7 +66,7 @@ func run() int {
 
 	if err := cmd.Start(); err != nil {
 		closePipes(pipes)
-		fmt.Fprintf(os.Stderr, "mproxy-agent: start command: %v\n", err)
+		log.Error("start command failed", "error", err)
 		_ = mux.Send(&agentproto.Frame{
 			Type:  agentproto.FrameExit,
 			Code:  127,
@@ -62,6 +74,8 @@ func run() int {
 		})
 		return 0 // Agent itself exits cleanly; error is in the exit frame.
 	}
+
+	log.Log(ctx, logging.LevelTrace, "child started", "pid", cmd.Process.Pid)
 
 	// Close child-side fds so the child is the only holder.
 	closeChildFDs(cmd)
@@ -74,7 +88,10 @@ func run() int {
 
 	// Forward signals to the child's process group.
 	mux.OnSignal(func(sig int) {
-		_ = sendSignalToGroup(cmd, sig)
+		log.Log(ctx, logging.LevelTrace, "forwarding signal to child", "signal", sig)
+		if err := sendSignalToGroup(cmd, sig); err != nil {
+			log.Warn("failed to send signal to child group", "signal", sig, "error", err)
+		}
 	})
 
 	// Bridge child stdout/stderr/extra fds → mux.
@@ -90,10 +107,14 @@ func run() int {
 				if n > 0 {
 					chunk := make([]byte, n)
 					copy(chunk, buf[:n])
-					_ = mux.SendData(stream, chunk)
+					if sendErr := mux.SendData(stream, chunk); sendErr != nil {
+						log.Warn("mux send data failed", "stream", stream, "error", sendErr)
+					}
 				}
 				if err != nil {
-					_ = mux.SendEOF(stream)
+					if sendErr := mux.SendEOF(stream); sendErr != nil {
+						log.Warn("mux send eof failed", "stream", stream, "error", sendErr)
+					}
 					r.Close()
 					return
 				}
@@ -126,6 +147,8 @@ func run() int {
 		}
 	}
 
+	log.Debug("child exited", "code", code)
+
 	// Wait for all output streams to drain.
 	outWG.Wait()
 
@@ -134,7 +157,10 @@ func run() int {
 	if waitErr != nil && code == 127 {
 		exitFrame.Error = waitErr.Error()
 	}
-	_ = mux.Send(exitFrame)
+	if err := mux.Send(exitFrame); err != nil {
+		// Can't log over mux anymore, fall back to stderr.
+		slog.New(slog.NewTextHandler(os.Stderr, nil)).Warn("failed to send exit frame", "error", err)
+	}
 
 	// Cancel context to stop mux read loop and reaper.
 	cancel()

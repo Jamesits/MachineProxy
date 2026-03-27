@@ -5,26 +5,34 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"os"
 	"strings"
 	"sync"
 
+	"github.com/jamesits/machineproxy/pkg/logging"
 	"github.com/jamesits/machineproxy/pkg/remoteexec"
 )
 
 type Deps struct {
 	Remote    remoteexec.Runner
 	EnvFilter func(env []string) []string // nil means pass through unfiltered
+	Log       *slog.Logger
 }
 
 type Server struct {
 	deps   Deps
+	log    *slog.Logger
 	connWG sync.WaitGroup
 }
 
 func NewServer(deps Deps) *Server {
-	return &Server{deps: deps}
+	log := deps.Log
+	if log == nil {
+		log = slog.Default()
+	}
+	return &Server{deps: deps, log: log}
 }
 
 func (s *Server) Start(ctx context.Context, socketPath string) error {
@@ -33,6 +41,7 @@ func (s *Server) Start(ctx context.Context, socketPath string) error {
 	if err != nil {
 		return err
 	}
+	s.log.Debug("broker listening", "socket", socketPath)
 
 	go func() {
 		<-ctx.Done()
@@ -42,13 +51,13 @@ func (s *Server) Start(ctx context.Context, socketPath string) error {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			// Wait for in-flight connections to finish before returning.
 			s.connWG.Wait()
 			if ctx.Err() != nil {
 				return nil
 			}
 			return err
 		}
+		s.log.Log(ctx, logging.LevelTrace, "broker accepted connection")
 		s.connWG.Add(1)
 		go func() {
 			defer s.connWG.Done()
@@ -65,9 +74,11 @@ func (s *Server) serveConn(ctx context.Context, conn net.Conn) {
 
 	var req ExecRequest
 	if err := dec.Decode(&req); err != nil {
+		s.log.Warn("broker decode exec request failed", "error", err)
 		_ = enc.Encode(Frame{Stream: StreamExit, Code: 127, Error: err.Error()})
 		return
 	}
+	s.log.Log(ctx, logging.LevelTrace, "broker exec request", "path", req.Path, "argv", req.Argv, "cwd", req.Cwd)
 
 	if s.deps.EnvFilter != nil {
 		req.Env = s.deps.EnvFilter(req.Env)
@@ -130,6 +141,7 @@ func (s *Server) serveConn(ctx context.Context, conn net.Conn) {
 			ExtraFDs: extraFDPipes,
 		}
 
+		s.log.Debug("broker running remote command (with control)", "path", req.Path)
 		exitCode, runErr := sigRunner.RunWithControl(ctx, req, ctrl)
 		_ = stdoutWriter.Close()
 		_ = stderrWriter.Close()
@@ -137,6 +149,12 @@ func (s *Server) serveConn(ctx context.Context, conn net.Conn) {
 			rwc.Close()
 		}
 		streamWG.Wait()
+
+		if runErr != nil {
+			s.log.Warn("broker remote command failed", "path", req.Path, "exit_code", exitCode, "error", runErr)
+		} else {
+			s.log.Log(ctx, logging.LevelTrace, "broker remote command finished", "path", req.Path, "exit_code", exitCode)
+		}
 
 		exitFrame := Frame{Stream: StreamExit, Code: exitCode}
 		if runErr != nil {
@@ -147,10 +165,15 @@ func (s *Server) serveConn(ctx context.Context, conn net.Conn) {
 		// Legacy path: no signal/fd support.
 		go s.readFramesBasic(dec, stdinWriter)
 
+		s.log.Debug("broker running remote command (legacy)", "path", req.Path)
 		exitCode, runErr := s.runRemote(ctx, req, stdinReader, stdoutWriter, stderrWriter)
 		_ = stdoutWriter.Close()
 		_ = stderrWriter.Close()
 		streamWG.Wait()
+
+		if runErr != nil {
+			s.log.Warn("broker remote command failed", "path", req.Path, "exit_code", exitCode, "error", runErr)
+		}
 
 		exitFrame := Frame{Stream: StreamExit, Code: exitCode}
 		if runErr != nil {

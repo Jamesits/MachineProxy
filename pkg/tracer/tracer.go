@@ -2,6 +2,7 @@ package tracer
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -9,14 +10,16 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/jamesits/machineproxy/pkg/logging"
 	"golang.org/x/sys/unix"
 )
 
 // Config holds the tracer configuration.
 type Config struct {
-	ShimPath   string   // Absolute path to mproxy-shim.
-	Whitelist  []string // Absolute paths that should execute locally.
-	BrokerSock string   // Path to broker Unix socket.
+	ShimPath   string       // Absolute path to mproxy-shim.
+	Whitelist  []string     // Absolute paths that should execute locally.
+	BrokerSock string       // Path to broker Unix socket.
+	Log        *slog.Logger // Optional logger; defaults to slog.Default.
 }
 
 // pidState tracks per-process tracing state.
@@ -29,14 +32,20 @@ type pidState struct {
 // traced process, redirecting non-whitelisted exec calls through mproxy-shim.
 type Tracer struct {
 	cfg      Config
+	log      *slog.Logger
 	baseline *EnvBaseline
 	pids     map[int]*pidState
 }
 
 // New creates a tracer with the given configuration.
 func New(cfg Config) *Tracer {
+	log := cfg.Log
+	if log == nil {
+		log = slog.Default()
+	}
 	return &Tracer{
 		cfg:  cfg,
+		log:  log,
 		pids: make(map[int]*pidState),
 	}
 }
@@ -91,6 +100,8 @@ func (t *Tracer) Start(argv []string, env []string, onStart func(childPid int)) 
 	t.baseline = NewEnvBaselineFromSlice(env)
 	t.pids[pid] = &pidState{}
 
+	t.log.Debug("tracer started", "child_pid", pid)
+
 	if onStart != nil {
 		onStart(pid)
 	}
@@ -100,7 +111,9 @@ func (t *Tracer) Start(argv []string, env []string, onStart func(childPid int)) 
 		return 127, fmt.Errorf("ptrace syscall: %w", err)
 	}
 
-	return t.traceLoop(pid), nil
+	code := t.traceLoop(pid)
+	t.log.Debug("tracer finished", "exit_code", code)
+	return code, nil
 }
 
 // traceLoop processes ptrace events until all traced pids exit.
@@ -146,14 +159,10 @@ func (t *Tracer) traceLoop(childPid int) int {
 			event == unix.PTRACE_EVENT_CLONE:
 			if newPid, err := unix.PtraceGetEventMsg(pid); err == nil {
 				np := int(newPid)
+				t.log.Log(nil, logging.LevelTrace, "new child process", "parent_pid", pid, "child_pid", np, "event", event)
 				if _, exists := t.pids[np]; !exists {
-					// The new child will be delivered a SIGSTOP by
-					// the kernel. We must suppress it to avoid
-					// actually stopping the process.
 					t.pids[np] = &pidState{expectStop: true}
 				}
-				// If already registered, the SIGSTOP arrived first
-				// and was already suppressed — don't overwrite state.
 			}
 			_ = unix.PtraceSyscall(pid, 0)
 
@@ -229,8 +238,13 @@ func (t *Tracer) handleSyscallStop(pid int) {
 
 	pathname, err := ReadString(pid, regs.PathAddr(isExecveat))
 	if err != nil || t.shouldAllow(pathname) {
+		if err == nil {
+			t.log.Log(nil, logging.LevelTrace, "exec allowed (whitelisted)", "pid", pid, "path", pathname)
+		}
 		return
 	}
+
+	t.log.Log(nil, logging.LevelTrace, "exec intercepted, rewriting to shim", "pid", pid, "path", pathname)
 
 	argv, err := ReadStringArray(pid, regs.ArgvAddr(isExecveat))
 	if err != nil {

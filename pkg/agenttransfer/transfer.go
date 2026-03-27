@@ -4,9 +4,11 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"sync"
 
+	"github.com/jamesits/machineproxy/pkg/logging"
 	"github.com/pkg/sftp"
 )
 
@@ -19,6 +21,7 @@ type Transferer struct {
 	sftp       SFTPProvider
 	localPath  string // path to the local agent binary
 	remotePath string // destination on remote host
+	log        *slog.Logger
 
 	mu          sync.Mutex
 	transferred bool
@@ -28,11 +31,15 @@ type Transferer struct {
 // New creates a Transferer. localPath is the path to the pre-built
 // agent binary on the local machine. remotePath is where it will be
 // placed on the remote host.
-func New(sftp SFTPProvider, localPath, remotePath string) *Transferer {
+func New(sftp SFTPProvider, localPath, remotePath string, log *slog.Logger) *Transferer {
+	if log == nil {
+		log = slog.Default()
+	}
 	return &Transferer{
 		sftp:       sftp,
 		localPath:  localPath,
 		remotePath: remotePath,
+		log:        log,
 	}
 }
 
@@ -43,9 +50,11 @@ func (t *Transferer) Ensure() (string, error) {
 	defer t.mu.Unlock()
 
 	if t.transferred {
+		t.log.Log(nil, logging.LevelTrace, "agent binary already transferred")
 		return t.remotePath, nil
 	}
 
+	t.log.Log(nil, logging.LevelTrace, "computing local agent hash", "path", t.localPath)
 	hash, err := t.computeLocalHash()
 	if err != nil {
 		return "", fmt.Errorf("hash local agent binary: %w", err)
@@ -60,22 +69,24 @@ func (t *Transferer) Ensure() (string, error) {
 	// Check if remote already has this version.
 	hashPath := t.remotePath + ".sha256"
 	if existing, err := readRemoteFile(client, hashPath); err == nil && string(existing) == hash {
+		t.log.Debug("agent binary hash matches, skipping upload", "hash", hash[:12])
 		t.transferred = true
 		return t.remotePath, nil
 	}
 
 	// Upload the binary.
+	t.log.Debug("uploading agent binary", "local", t.localPath, "remote", t.remotePath)
 	if err := uploadFile(client, t.localPath, t.remotePath, 0o755); err != nil {
 		return "", fmt.Errorf("upload agent: %w", err)
 	}
 
 	// Write the hash marker.
 	if err := writeRemoteFile(client, hashPath, []byte(hash), 0o644); err != nil {
-		// Non-fatal: next run will just re-upload.
-		_ = err
+		t.log.Warn("failed to write hash marker (non-fatal)", "error", err)
 	}
 
 	t.transferred = true
+	t.log.Debug("agent binary transferred", "remote", t.remotePath, "hash", hash[:12])
 	return t.remotePath, nil
 }
 
