@@ -27,8 +27,9 @@ type Config struct {
 	Exec struct {
 		LocalCommands []string `yaml:"local_commands"`
 		ShimPath      string   `yaml:"shim_path"`
-		EnvKeep       []string `yaml:"env_keep"`   // glob patterns for inherited env vars to forward
-		EnvRemove     []string `yaml:"env_remove"` // glob patterns for env vars to always strip
+		TracerPath    string   `yaml:"tracer_path"` // path to mproxy-tracer binary; auto-discovered if empty
+		EnvKeep       []string `yaml:"env_keep"`    // glob patterns for inherited env vars to forward
+		EnvRemove     []string `yaml:"env_remove"`  // glob patterns for env vars to always strip
 	} `yaml:"exec"`
 
 	Broker struct {
@@ -89,6 +90,11 @@ func (c *Config) applyDefaults() error {
 	if c.Exec.ShimPath != "" {
 		if !filepath.IsAbs(c.Exec.ShimPath) {
 			return errors.New("exec.shim_path must be absolute")
+		}
+	}
+	if c.Exec.TracerPath != "" {
+		if !filepath.IsAbs(c.Exec.TracerPath) {
+			return errors.New("exec.tracer_path must be absolute")
 		}
 	}
 	return nil

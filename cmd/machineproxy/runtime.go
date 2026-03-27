@@ -222,7 +222,7 @@ func (d *runtimeDeps) RunChild(ctx context.Context, cmdline []string) error {
 		return errors.New("missing child command")
 	}
 
-	tracerBin, err := resolveTracerPath()
+	tracerBin, err := resolveTracerPath(d.cfg.Exec.TracerPath)
 	if err != nil {
 		return err
 	}
@@ -249,9 +249,14 @@ func (d *runtimeDeps) RunChild(ctx context.Context, cmdline []string) error {
 	return d.namespace.Run(ctx, d.fuseMountDir, d.cfg.Workspace.RemotePath, tracerArgs, env)
 }
 
-func resolveTracerPath() (string, error) {
-	if p := os.Getenv("MPROXY_TRACER_BIN"); p != "" {
-		return p, nil
+// resolveTracerPath finds the mproxy-tracer binary using the config value,
+// then falling back to adjacent binary and well-known paths.
+func resolveTracerPath(configPath string) (string, error) {
+	if configPath != "" {
+		if _, err := os.Stat(configPath); err != nil {
+			return "", fmt.Errorf("configured exec.tracer_path not found: %w", err)
+		}
+		return configPath, nil
 	}
 
 	// Look alongside the main binary first.
@@ -272,7 +277,7 @@ func resolveTracerPath() (string, error) {
 		}
 	}
 
-	return "", errors.New("cannot find mproxy-tracer binary; set MPROXY_TRACER_BIN or place it alongside machineproxy")
+	return "", errors.New("cannot find mproxy-tracer binary; set exec.tracer_path in config or place it alongside machineproxy")
 }
 
 func resolveAgentBinaryPath(configPath string) (string, error) {
