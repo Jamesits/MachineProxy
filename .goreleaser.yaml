@@ -63,20 +63,28 @@ nfpms:
   - id: machineproxy
     package_name: machineproxy
     description: Machine proxy for remote execution
+    vendor: 'Jamesits'
+    maintainer: 'Jamesits <osscontrib@ciexyz.net>'
+    homepage: 'https://github.com/Jamesits/MachineProxy'
+    license: MIT
     formats:
+      - apk
       - deb
       - rpm
+      - archlinux
     dependencies:
       - bubblewrap
+    ids:
+      - machineproxy
     contents:
-      - src: machineproxy
-        dst: /usr/bin/machineproxy
-      - src: mproxy-shim
+      - src: dist/mproxy-shim_{{ .Target }}/mproxy-shim
         dst: /usr/lib/machineproxy/mproxy-shim
-      - src: mproxy-tracer
+      - src: dist/mproxy-tracer_{{ .Target }}/mproxy-tracer
         dst: /usr/lib/machineproxy/mproxy-tracer
-      - src: agent/{{ .Os }}/{{ .Arch }}/mproxy-agent
+      - src: dist/agent/{{ .Os }}/{{ .Arch }}/mproxy-agent
         dst: /usr/lib/machineproxy/agent/{{ .Os }}/{{ .Arch }}/mproxy-agent
+      - src: config/machineproxy.example.yaml
+        dst: /usr/share/doc/machineproxy/examples/machineproxy.example.yaml
 
 checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
