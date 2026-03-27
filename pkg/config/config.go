@@ -5,43 +5,75 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
+// Mount represents a parsed container mount entry in docker-compose style.
+// Format: [local_path:]remote_path
+type Mount struct {
+	// RemotePath is the path on the remote machine (FUSE source).
+	RemotePath string
+	// ContainerPath is the path inside the container (bind target).
+	// Equals RemotePath when no explicit local path is given.
+	ContainerPath string
+}
+
+// ParseMount parses a docker-compose style mount string.
+func ParseMount(s string) (Mount, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return Mount{}, errors.New("mount entry must not be empty")
+	}
+	if i := strings.Index(s, ":"); i >= 0 {
+		local := s[:i]
+		remote := s[i+1:]
+		if local == "" || remote == "" {
+			return Mount{}, fmt.Errorf("invalid mount %q: both local and remote paths are required around ':'", s)
+		}
+		if !filepath.IsAbs(local) || !filepath.IsAbs(remote) {
+			return Mount{}, fmt.Errorf("mount paths must be absolute: %q", s)
+		}
+		return Mount{RemotePath: remote, ContainerPath: local}, nil
+	}
+	if !filepath.IsAbs(s) {
+		return Mount{}, fmt.Errorf("mount path must be absolute: %q", s)
+	}
+	return Mount{RemotePath: s, ContainerPath: s}, nil
+}
+
 // Config describes machineproxy runtime behavior.
 type Config struct {
 	LogLevel string `yaml:"log_level"` // trace, debug, info, warn, error
 
-	SSH struct {
-		Addr           string        `yaml:"addr"`
-		User           string        `yaml:"user"`
-		PrivateKeyPath string        `yaml:"private_key_path"`
-		KnownHostsPath string        `yaml:"known_hosts_path"`
-		KeepAlive      time.Duration `yaml:"keep_alive"`
-	} `yaml:"ssh"`
+	Remote struct {
+		SSH struct {
+			Addr           string        `yaml:"addr"`
+			User           string        `yaml:"user"`
+			PrivateKeyPath string        `yaml:"private_key_path"`
+			KnownHostsPath string        `yaml:"known_hosts_path"`
+			KeepAlive      time.Duration `yaml:"keep_alive"`
+		} `yaml:"ssh"`
+		OS   string `yaml:"os"`   // remote OS for agent binary resolution; defaults to runtime.GOOS
+		Arch string `yaml:"arch"` // remote arch for agent binary resolution; defaults to runtime.GOARCH
+	} `yaml:"remote"`
 
-	Workspace struct {
-		RemotePath string `yaml:"remote_path"`
-	} `yaml:"workspace"`
-
-	Exec struct {
+	Container struct {
 		LocalCommands []string `yaml:"local_commands"`
-		ShimPath      string   `yaml:"shim_path"`
-		TracerPath    string   `yaml:"tracer_path"` // path to mproxy-tracer binary; auto-discovered if empty
-		EnvKeep       []string `yaml:"env_keep"`    // glob patterns for inherited env vars to forward
-		EnvRemove     []string `yaml:"env_remove"`  // glob patterns for env vars to always strip
-	} `yaml:"exec"`
+		Mounts        []string `yaml:"mounts"`    // docker-compose style: [local:]remote
+		EnvKeep       []string `yaml:"env_keep"`   // glob patterns for inherited env vars to forward
+		EnvRemove     []string `yaml:"env_remove"` // glob patterns for env vars to always strip
+	} `yaml:"container"`
 
-	Broker struct {
-		SocketPath string `yaml:"socket_path"`
-	} `yaml:"broker"`
-
-	Agent struct {
-		LocalPath  string `yaml:"local_path"`
-		RemotePath string `yaml:"remote_path"`
-	} `yaml:"agent"`
+	Components struct {
+		ShimPath       string `yaml:"shim_path"`
+		TracerPath     string `yaml:"tracer_path"`
+		AgentLocalPath string `yaml:"agent_local_path"`
+		AgentRemotePath string `yaml:"agent_remote_path"`
+	} `yaml:"components"`
 
 	Recording struct {
 		Path string `yaml:"path"` // empty disables recording
@@ -69,37 +101,40 @@ func (c *Config) applyDefaults() error {
 	if c.LogLevel == "" {
 		c.LogLevel = "info"
 	}
-	if c.SSH.KeepAlive == 0 {
-		c.SSH.KeepAlive = 20 * time.Second
+	if c.Remote.SSH.KeepAlive == 0 {
+		c.Remote.SSH.KeepAlive = 20 * time.Second
 	}
-	if c.Broker.SocketPath == "" {
-		c.Broker.SocketPath = "/tmp/machineproxy.sock"
+	if c.Remote.OS == "" {
+		c.Remote.OS = runtime.GOOS
 	}
-	if c.Agent.RemotePath == "" {
-		c.Agent.RemotePath = "/tmp/mproxy-agent"
+	if c.Remote.Arch == "" {
+		c.Remote.Arch = runtime.GOARCH
 	}
-	if len(c.Exec.EnvKeep) == 0 {
-		c.Exec.EnvKeep = []string{
+	if c.Components.AgentRemotePath == "" {
+		c.Components.AgentRemotePath = "/tmp/mproxy-agent"
+	}
+	if len(c.Container.EnvKeep) == 0 {
+		c.Container.EnvKeep = []string{
 			"HOME", "PATH", "TERM", "LANG", "LC_*",
 			"USER", "LOGNAME", "SHELL",
 			"EDITOR", "VISUAL", "PAGER",
 			"TZ", "DISPLAY", "SSH_AUTH_SOCK", "XDG_*",
 		}
 	}
-	if len(c.Exec.EnvRemove) == 0 {
-		c.Exec.EnvRemove = []string{
+	if len(c.Container.EnvRemove) == 0 {
+		c.Container.EnvRemove = []string{
 			"LD_PRELOAD", "LD_LIBRARY_PATH",
 			"MPROXY_*",
 		}
 	}
-	if c.Exec.ShimPath != "" {
-		if !filepath.IsAbs(c.Exec.ShimPath) {
-			return errors.New("exec.shim_path must be absolute")
+	if c.Components.ShimPath != "" {
+		if !filepath.IsAbs(c.Components.ShimPath) {
+			return errors.New("components.shim_path must be absolute")
 		}
 	}
-	if c.Exec.TracerPath != "" {
-		if !filepath.IsAbs(c.Exec.TracerPath) {
-			return errors.New("exec.tracer_path must be absolute")
+	if c.Components.TracerPath != "" {
+		if !filepath.IsAbs(c.Components.TracerPath) {
+			return errors.New("components.tracer_path must be absolute")
 		}
 	}
 	return nil
@@ -111,28 +146,30 @@ func (c *Config) Validate() error {
 	default:
 		return fmt.Errorf("log_level must be one of trace, debug, info, warn, error; got %q", c.LogLevel)
 	}
-	if c.SSH.Addr == "" {
-		return errors.New("ssh.addr is required")
+	if c.Remote.SSH.Addr == "" {
+		return errors.New("remote.ssh.addr is required")
 	}
-	if c.SSH.User == "" {
-		return errors.New("ssh.user is required")
+	if c.Remote.SSH.User == "" {
+		return errors.New("remote.ssh.user is required")
 	}
-	if c.SSH.PrivateKeyPath == "" {
-		return errors.New("ssh.private_key_path is required")
+	if c.Remote.SSH.PrivateKeyPath == "" {
+		return errors.New("remote.ssh.private_key_path is required")
 	}
-	if c.Workspace.RemotePath == "" {
-		return errors.New("workspace.remote_path is required")
+	if len(c.Container.Mounts) == 0 {
+		return errors.New("container.mounts must not be empty")
 	}
-	if len(c.Exec.LocalCommands) == 0 {
-		return errors.New("exec.local_commands must not be empty")
-	}
-	for _, p := range c.Exec.LocalCommands {
-		if !filepath.IsAbs(p) {
-			return fmt.Errorf("exec.local_commands entry must be absolute path: %q", p)
+	for _, m := range c.Container.Mounts {
+		if _, err := ParseMount(m); err != nil {
+			return fmt.Errorf("container.mounts: %w", err)
 		}
 	}
-	if c.Broker.SocketPath == "" {
-		return errors.New("broker.socket_path is required")
+	if len(c.Container.LocalCommands) == 0 {
+		return errors.New("container.local_commands must not be empty")
+	}
+	for _, p := range c.Container.LocalCommands {
+		if !filepath.IsAbs(p) {
+			return fmt.Errorf("container.local_commands entry must be absolute path: %q", p)
+		}
 	}
 	return nil
 }

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 )
 
 // LibDir is the standard install location for machineproxy support binaries.
@@ -28,14 +27,14 @@ func ResolveTracerPath(configPath string) (string, error) {
 
 // ResolveAgentBinaryPath finds the mproxy-agent binary. It checks the
 // MPROXY_AGENT_BIN env var first, then the config value, adjacent binary,
-// and well-known install paths.
-// FIXME: should check for the remote OS and arch instead
-func ResolveAgentBinaryPath(configPath string) (string, error) {
+// and well-known install paths. The goos and goarch parameters select the
+// correct platform-specific binary for the remote host.
+func ResolveAgentBinaryPath(configPath, goos, goarch string) (string, error) {
 	if p := os.Getenv("MPROXY_AGENT_BIN"); p != "" {
 		return p, nil
 	}
 	return resolveBinary("mproxy-agent", configPath, []string{
-		filepath.Join(LibDir, "agent", runtime.GOOS, runtime.GOARCH, "mproxy-agent"),
+		filepath.Join(LibDir, "agent", goos, goarch, "mproxy-agent"),
 	})
 }
 

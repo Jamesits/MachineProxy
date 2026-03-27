@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"os/user"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -36,6 +35,7 @@ type runtimeDeps struct {
 	bkr          *broker.Server
 	fuseMountDir string
 	recorder     *agentproto.Recorder
+	brokerSocket string // auto-generated temp socket path
 
 	brokerCtxCancel context.CancelFunc
 }
@@ -43,10 +43,10 @@ type runtimeDeps struct {
 func newRuntimeDeps(cfg *config.Config, log *slog.Logger) (*runtimeDeps, error) {
 	sshLog := log.With("component", "ssh")
 	dial, err := sshconn.NewDialFunc(sshconn.DialConfig{
-		Addr:           cfg.SSH.Addr,
-		User:           cfg.SSH.User,
-		PrivateKeyPath: cfg.SSH.PrivateKeyPath,
-		KnownHostsPath: cfg.SSH.KnownHostsPath,
+		Addr:           cfg.Remote.SSH.Addr,
+		User:           cfg.Remote.SSH.User,
+		PrivateKeyPath: cfg.Remote.SSH.PrivateKeyPath,
+		KnownHostsPath: cfg.Remote.SSH.KnownHostsPath,
 		Timeout:        10 * time.Second,
 	})
 	if err != nil {
@@ -59,7 +59,7 @@ func newRuntimeDeps(cfg *config.Config, log *slog.Logger) (*runtimeDeps, error) 
 		sshManager: sshconn.NewManager(sshconn.Options{
 			Dial:              dial,
 			ReconnectInterval: time.Second,
-			KeepAliveInterval: cfg.SSH.KeepAlive,
+			KeepAliveInterval: cfg.Remote.SSH.KeepAlive,
 			Log:               sshLog,
 		}),
 		namespace: ns.New(ns.Deps{Log: log.With("component", "ns")}),
@@ -75,6 +75,10 @@ func (d *runtimeDeps) Close() {
 	}
 	if d.brokerCtxCancel != nil {
 		d.brokerCtxCancel()
+	}
+	// Clean up the broker socket to prevent leak.
+	if d.brokerSocket != "" {
+		_ = os.Remove(d.brokerSocket)
 	}
 	if d.fuseServer != nil {
 		if err := d.fuseServer.Unmount(); err != nil {
@@ -97,7 +101,7 @@ func (d *runtimeDeps) Close() {
 }
 
 func (d *runtimeDeps) StartSSH(ctx context.Context) error {
-	d.log.Log(ctx, logging.LevelTrace, "starting ssh manager", "addr", d.cfg.SSH.Addr, "user", d.cfg.SSH.User)
+	d.log.Log(ctx, logging.LevelTrace, "starting ssh manager", "addr", d.cfg.Remote.SSH.Addr, "user", d.cfg.Remote.SSH.User)
 	if err := d.sshManager.Start(ctx); err != nil {
 		return err
 	}
@@ -109,7 +113,7 @@ func (d *runtimeDeps) StartSSH(ctx context.Context) error {
 
 	for {
 		if d.sshManager.IsConnected() {
-			d.log.Debug("ssh connected", "addr", d.cfg.SSH.Addr)
+			d.log.Debug("ssh connected", "addr", d.cfg.Remote.SSH.Addr)
 			return nil
 		}
 		select {
@@ -135,7 +139,13 @@ func (d *runtimeDeps) EnterNamespace(ctx context.Context) error {
 }
 
 func (d *runtimeDeps) MountWorkspace(ctx context.Context) error {
-	d.log.Log(ctx, logging.LevelTrace, "mounting workspace", "remote_path", d.cfg.Workspace.RemotePath)
+	// Parse the first mount entry for the workspace FUSE mount.
+	mount, err := config.ParseMount(d.cfg.Container.Mounts[0])
+	if err != nil {
+		return fmt.Errorf("parse workspace mount: %w", err)
+	}
+
+	d.log.Log(ctx, logging.LevelTrace, "mounting workspace", "remote_path", mount.RemotePath)
 	tmpDir, err := os.MkdirTemp("", "machineproxy-fuse-*")
 	if err != nil {
 		return fmt.Errorf("create temp mountpoint: %w", err)
@@ -149,23 +159,34 @@ func (d *runtimeDeps) MountWorkspace(ctx context.Context) error {
 	}
 
 	fsLog := d.log.With("component", "fuse")
-	backend := workspacefs.New(&workspacefs.SFTPAdapter{C: sftpClient}, d.cfg.Workspace.RemotePath, fsLog)
+	backend := workspacefs.New(&workspacefs.SFTPAdapter{C: sftpClient}, mount.RemotePath, fsLog)
 	server, err := workspacefs.Mount(ctx, backend, d.fuseMountDir)
 	if err != nil {
 		return fmt.Errorf("mount workspace fuse: %w", err)
 	}
 	d.fuseServer = server
-	d.log.Debug("workspace mounted", "mount_dir", tmpDir, "remote_path", d.cfg.Workspace.RemotePath)
+	d.log.Debug("workspace mounted", "mount_dir", tmpDir, "remote_path", mount.RemotePath)
 	return nil
 }
 
 func (d *runtimeDeps) StartBroker(ctx context.Context) error {
-	d.log.Log(ctx, logging.LevelTrace, "starting broker", "socket", d.cfg.Broker.SocketPath)
-	if err := os.MkdirAll(filepath.Dir(d.cfg.Broker.SocketPath), 0o755); err != nil {
-		return fmt.Errorf("create broker socket dir: %w", err)
+	// Generate a random temporary socket path to avoid collisions.
+	f, err := os.CreateTemp("", "machineproxy-*.sock")
+	if err != nil {
+		return fmt.Errorf("create temp broker socket: %w", err)
 	}
+	socketPath := f.Name()
+	f.Close()
+	os.Remove(socketPath) // broker.Start will create the Unix socket here
+	d.brokerSocket = socketPath
 
-	agentLocalPath, err := config.ResolveAgentBinaryPath(d.cfg.Agent.LocalPath)
+	d.log.Log(ctx, logging.LevelTrace, "starting broker", "socket", socketPath)
+
+	agentLocalPath, err := config.ResolveAgentBinaryPath(
+		d.cfg.Components.AgentLocalPath,
+		d.cfg.Remote.OS,
+		d.cfg.Remote.Arch,
+	)
 	if err != nil {
 		return fmt.Errorf("resolve agent binary: %w", err)
 	}
@@ -180,7 +201,7 @@ func (d *runtimeDeps) StartBroker(ctx context.Context) error {
 	transferer := agenttransfer.New(
 		func() *sftp.Client { return sftpClient },
 		agentLocalPath,
-		d.cfg.Agent.RemotePath,
+		d.cfg.Components.AgentRemotePath,
 		d.log.With("component", "transfer"),
 	)
 
@@ -201,17 +222,17 @@ func (d *runtimeDeps) StartBroker(ctx context.Context) error {
 			StartTime: time.Now().UnixNano(),
 			LocalUser: username,
 			LocalPID:  os.Getpid(),
-			SSHAddr:   d.cfg.SSH.Addr,
-			SSHUser:   d.cfg.SSH.User,
-			AgentPath: d.cfg.Agent.RemotePath,
+			SSHAddr:   d.cfg.Remote.SSH.Addr,
+			SSHUser:   d.cfg.Remote.SSH.User,
+			AgentPath: d.cfg.Components.AgentRemotePath,
 		}); err != nil {
 			d.log.Warn("failed to write session header", "error", err)
 		}
 	}
 
 	brokerLog := d.log.With("component", "broker")
-	envKeep := d.cfg.Exec.EnvKeep
-	envRemove := d.cfg.Exec.EnvRemove
+	envKeep := d.cfg.Container.EnvKeep
+	envRemove := d.cfg.Container.EnvRemove
 	d.bkr = broker.NewServer(broker.Deps{
 		Remote: &remoteexec.AgentRunner{
 			Provider:   d.sshManager,
@@ -228,7 +249,7 @@ func (d *runtimeDeps) StartBroker(ctx context.Context) error {
 	d.brokerCtxCancel = cancel
 
 	go func() {
-		if err := d.bkr.Start(bctx, d.cfg.Broker.SocketPath); err != nil {
+		if err := d.bkr.Start(bctx, socketPath); err != nil {
 			d.log.Warn("broker stopped with error", "error", err)
 		}
 	}()
@@ -239,8 +260,8 @@ func (d *runtimeDeps) StartBroker(ctx context.Context) error {
 	defer ticker.Stop()
 
 	for {
-		if _, err := os.Stat(d.cfg.Broker.SocketPath); err == nil {
-			d.log.Debug("broker ready", "socket", d.cfg.Broker.SocketPath)
+		if _, err := os.Stat(socketPath); err == nil {
+			d.log.Debug("broker ready", "socket", socketPath)
 			return nil
 		}
 		select {
@@ -258,13 +279,13 @@ func (d *runtimeDeps) RunChild(ctx context.Context, cmdline []string) error {
 		return errors.New("missing child command")
 	}
 
-	tracerBin, err := config.ResolveTracerPath(d.cfg.Exec.TracerPath)
+	tracerBin, err := config.ResolveTracerPath(d.cfg.Components.TracerPath)
 	if err != nil {
 		return err
 	}
 	d.log.Log(ctx, logging.LevelTrace, "resolved tracer binary", "path", tracerBin)
 
-	shimBin, err := config.ResolveShimPath(d.cfg.Exec.ShimPath)
+	shimBin, err := config.ResolveShimPath(d.cfg.Components.ShimPath)
 	if err != nil {
 		return err
 	}
@@ -272,26 +293,29 @@ func (d *runtimeDeps) RunChild(ctx context.Context, cmdline []string) error {
 
 	env := ns.FormatEnv(
 		os.Environ(),
-		d.cfg.Broker.SocketPath,
+		d.brokerSocket,
 		shimBin,
 	)
+
+	// Parse the first mount entry for container path binding.
+	mount, _ := config.ParseMount(d.cfg.Container.Mounts[0])
 
 	// Wrap the command in the ptrace-based tracer so exec interception
 	// works with both dynamically and statically linked binaries.
 	tracerArgs := []string{
 		tracerBin,
 		"--shim-path", shimBin,
-		"--broker-sock", d.cfg.Broker.SocketPath,
+		"--broker-sock", d.brokerSocket,
 		"--log-level", d.cfg.LogLevel,
 	}
-	if len(d.cfg.Exec.LocalCommands) > 0 {
-		tracerArgs = append(tracerArgs, "--whitelist", strings.Join(d.cfg.Exec.LocalCommands, ":"))
+	if len(d.cfg.Container.LocalCommands) > 0 {
+		tracerArgs = append(tracerArgs, "--whitelist", strings.Join(d.cfg.Container.LocalCommands, ":"))
 	}
 	tracerArgs = append(tracerArgs, "--")
 	tracerArgs = append(tracerArgs, cmdline...)
 
 	d.log.Log(ctx, logging.LevelTrace, "launching child via tracer", "tracer", tracerBin, "command", cmdline)
-	return d.namespace.Run(ctx, d.fuseMountDir, d.cfg.Workspace.RemotePath, tracerArgs, env)
+	return d.namespace.Run(ctx, d.fuseMountDir, mount.ContainerPath, tracerArgs, env)
 }
 
 func currentUsername() (string, error) {

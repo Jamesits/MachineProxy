@@ -1,22 +1,25 @@
 # Log verbosity: trace, debug, info, warn, error
 log_level: info
 
-ssh:
-  addr: remote.server.example.com:22
-  user: dev
-  private_key_path: /home/dev/.ssh/id_ed25519
-  known_hosts_path: /home/dev/.ssh/known_hosts
-  keep_alive: 20s
+remote:
+  ssh:
+    addr: remote.server.example.com:22
+    user: dev
+    private_key_path: /home/dev/.ssh/id_ed25519
+    known_hosts_path: /home/dev/.ssh/known_hosts
+    keep_alive: 20s
+  # Remote host OS and architecture for agent binary resolution.
+  # Defaults to the local machine's runtime.GOOS / runtime.GOARCH.
+  # os: linux
+  # arch: amd64
 
-workspace:
-  remote_path: /workspace
-
-exec:
+container:
   local_commands:
     - /usr/bin/env
-  # All binary paths are auto-discovered from /usr/lib/machineproxy/ when omitted.
-  # shim_path: /usr/lib/machineproxy/mproxy-shim
-  # tracer_path: /usr/lib/machineproxy/mproxy-tracer
+  # Docker-compose style mounts: [local_path:]remote_path
+  # A single path means the same path is used on both remote and container.
+  mounts:
+    - /workspace
 
   # Env vars added or changed by the parent process (after the hook loaded)
   # are always forwarded. For inherited (unchanged) vars, only those matching
@@ -45,12 +48,12 @@ exec:
   #   - LD_LIBRARY_PATH
   #   - MPROXY_*
 
-broker:
-  socket_path: /tmp/machineproxy.sock
-
-agent:
-  # local_path: /usr/lib/machineproxy/agent/linux/amd64/mproxy-agent
-  remote_path: /tmp/mproxy-agent
+# All binary paths are auto-discovered from /usr/lib/machineproxy/ when omitted.
+# components:
+#   shim_path: /usr/lib/machineproxy/mproxy-shim
+#   tracer_path: /usr/lib/machineproxy/mproxy-tracer
+#   agent_local_path: /usr/lib/machineproxy/agent/linux/amd64/mproxy-agent
+#   agent_remote_path: /tmp/mproxy-agent
 
 # recording:
 #   path: /tmp/machineproxy-session.rec
