@@ -80,6 +80,7 @@ nfpms:
       - archlinux
     dependencies:
       - bubblewrap
+      - fuse
     ids:
       - machineproxy
     contents:
