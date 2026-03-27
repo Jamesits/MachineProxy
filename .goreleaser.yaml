@@ -10,9 +10,8 @@ before:
 
 builds:
   - &build-defaults
-    id: machineproxy
-    main: ./cmd/machineproxy
-    binary: machineproxy
+    skip: true
+    id: build-defaults
     env:
       - CGO_ENABLED=0
     ldflags:
@@ -27,22 +26,29 @@ builds:
       - arm64
 
   - <<: *build-defaults
+    skip: false
+    id: machineproxy
+    main: ./cmd/machineproxy
+    binary: machineproxy
+
+  - <<: *build-defaults
+    skip: false
     id: mproxy-shim
     main: ./cmd/mproxy-shim
     binary: mproxy-shim
 
   - <<: *build-defaults
+    skip: false
     id: mproxy-tracer
     main: ./cmd/mproxy-tracer
     binary: mproxy-tracer
 
   - <<: *build-defaults
+    skip: false
     id: mproxy-agent
     main: ./cmd/mproxy-agent
     binary: agent/{{ .Os }}/{{ .Arch }}/mproxy-agent
     no_unique_dist_dir: true
-    ldflags:
-      - -s -w
 
 archives:
   - id: machineproxy
