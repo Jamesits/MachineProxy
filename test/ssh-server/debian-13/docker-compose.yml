@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: localhost/machineproxy/test-ssh-server:latest
+    image: localhost/machineproxy/test-ssh-server-debian-13:latest
     environment:
       AUTHORIZED_KEY: "${AUTHORIZED_KEY}"
     ports:

@@ -1,0 +1,12 @@
+services:
+  ssh-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: localhost/machineproxy/test-ssh-server-centos7:latest
+    environment:
+      AUTHORIZED_KEY: "${AUTHORIZED_KEY}"
+    ports:
+      - "[::1]:12222:22"
+    volumes:
+      - ./workspace:/workspace
