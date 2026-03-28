@@ -152,33 +152,33 @@ container:
 	}
 }
 
-func TestValidateLocalCommandFullPath(t *testing.T) {
-	if err := validateLocalCommand("/usr/bin/env"); err != nil {
+func TestCompileLocalCommandFullPath(t *testing.T) {
+	if _, err := CompileLocalCommand("/usr/bin/env"); err != nil {
 		t.Fatalf("expected valid, got %v", err)
 	}
 }
 
-func TestValidateLocalCommandRegex(t *testing.T) {
-	if err := validateLocalCommand("/^node/"); err != nil {
+func TestCompileLocalCommandRegex(t *testing.T) {
+	if _, err := CompileLocalCommand("/^node/"); err != nil {
 		t.Fatalf("expected valid regex, got %v", err)
 	}
 }
 
-func TestValidateLocalCommandRegexInvalid(t *testing.T) {
-	err := validateLocalCommand("/[invalid/")
+func TestCompileLocalCommandRegexInvalid(t *testing.T) {
+	_, err := CompileLocalCommand("/[invalid/")
 	if err == nil {
 		t.Fatal("expected error for invalid regex")
 	}
 }
 
-func TestValidateLocalCommandBasename(t *testing.T) {
-	if err := validateLocalCommand("env"); err != nil {
+func TestCompileLocalCommandBasename(t *testing.T) {
+	if _, err := CompileLocalCommand("env"); err != nil {
 		t.Fatalf("expected valid basename, got %v", err)
 	}
 }
 
-func TestValidateLocalCommandMiddleSlashRejected(t *testing.T) {
-	err := validateLocalCommand("usr/bin/env")
+func TestCompileLocalCommandMiddleSlashRejected(t *testing.T) {
+	_, err := CompileLocalCommand("usr/bin/env")
 	if err == nil {
 		t.Fatal("expected error for middle slashes")
 	}
@@ -187,17 +187,53 @@ func TestValidateLocalCommandMiddleSlashRejected(t *testing.T) {
 	}
 }
 
-func TestValidateLocalCommandEmpty(t *testing.T) {
-	err := validateLocalCommand("")
+func TestCompileLocalCommandEmpty(t *testing.T) {
+	_, err := CompileLocalCommand("")
 	if err == nil {
 		t.Fatal("expected error for empty entry")
 	}
 }
 
-func TestValidateLocalCommandEmptyRegex(t *testing.T) {
-	err := validateLocalCommand("//")
+func TestCompileLocalCommandEmptyRegex(t *testing.T) {
+	_, err := CompileLocalCommand("//")
 	if err == nil {
 		t.Fatal("expected error for empty regex")
+	}
+}
+
+func TestMatchLocalCommandAbsolutePath(t *testing.T) {
+	if !MatchLocalCommand("/usr/bin/env", "/usr/bin/env") {
+		t.Fatal("expected exact absolute path to match")
+	}
+	if MatchLocalCommand("/usr/bin/env", "/usr/bin/other") {
+		t.Fatal("expected different absolute path not to match")
+	}
+}
+
+func TestMatchLocalCommandBasename(t *testing.T) {
+	if !MatchLocalCommand("claude", "/opt/claude-code/bin/claude") {
+		t.Fatal("expected basename to match full path")
+	}
+	if !MatchLocalCommand("env", "/usr/bin/env") {
+		t.Fatal("expected basename to match")
+	}
+	if MatchLocalCommand("env", "/usr/bin/printenv") {
+		t.Fatal("expected different basename not to match")
+	}
+}
+
+func TestMatchLocalCommandRegex(t *testing.T) {
+	if !MatchLocalCommand("/python/", "/usr/bin/python3.11") {
+		t.Fatal("expected regex to match")
+	}
+	if MatchLocalCommand("/python/", "/usr/bin/node") {
+		t.Fatal("expected regex not to match non-python path")
+	}
+}
+
+func TestMatchLocalCommandInvalidRegex(t *testing.T) {
+	if MatchLocalCommand("/[invalid/", "/usr/bin/foo") {
+		t.Fatal("expected invalid regex to return false")
 	}
 }
 

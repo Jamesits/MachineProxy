@@ -7,9 +7,9 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime"
-	"strings"
 	"syscall"
 
+	"github.com/jamesits/machineproxy/pkg/config"
 	"github.com/jamesits/machineproxy/pkg/logging"
 	"golang.org/x/sys/unix"
 )
@@ -24,8 +24,8 @@ type Config struct {
 
 // pidState tracks per-process tracing state.
 type pidState struct {
-	inSyscall   bool // true = next syscall-stop is exit, false = entry
-	expectStop  bool // true = expecting initial SIGSTOP from ptrace auto-attach
+	inSyscall  bool // true = next syscall-stop is exit, false = entry
+	expectStop bool // true = expecting initial SIGSTOP from ptrace auto-attach
 }
 
 // Tracer manages ptrace-based exec interception for all descendants of a
@@ -320,18 +320,8 @@ func (t *Tracer) shouldAllow(pathname string) bool {
 	if pathname == "" || pathname == t.cfg.ShimPath {
 		return true
 	}
-	for _, allowed := range t.cfg.Whitelist {
-		if pathname == allowed {
-			return true
-		}
-	}
-	return false
-}
-
-// WhitelistContains checks if a path is in a colon-separated whitelist string.
-func WhitelistContains(whitelist, path string) bool {
-	for _, entry := range strings.Split(whitelist, ":") {
-		if entry == path {
+	for _, entry := range t.cfg.Whitelist {
+		if config.MatchLocalCommand(entry, pathname) {
 			return true
 		}
 	}
