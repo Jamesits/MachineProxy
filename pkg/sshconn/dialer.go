@@ -26,20 +26,17 @@ func NewDialFunc(cfg DialConfig) (func(ctx context.Context) (Conn, error), error
 		return nil, err
 	}
 
-	// hostKeyCallback, err := knownhosts.New(cfg.KnownHostsPath)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("load known_hosts: %w", err)
-	// }
-	hostKeyCallback := func(hostname string, remote net.Addr, key ssh.PublicKey) error {
-		return nil
-	}
-
+	algorithms := ssh.SupportedAlgorithms()
 	sshConfig := &ssh.ClientConfig{
-		User:            cfg.User,
-		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
-		HostKeyCallback: hostKeyCallback,
-		Timeout:         cfg.Timeout,
+		User:              cfg.User,
+		Auth:              []ssh.AuthMethod{ssh.PublicKeys(signer)},
+		HostKeyCallback:   ssh.InsecureIgnoreHostKey(),
+		Timeout:           cfg.Timeout,
+		HostKeyAlgorithms: algorithms.HostKeys,
 	}
+	sshConfig.Config.Ciphers = algorithms.Ciphers
+	sshConfig.Config.KeyExchanges = algorithms.KeyExchanges
+	sshConfig.Config.MACs = algorithms.MACs
 
 	return func(ctx context.Context) (Conn, error) {
 		return dialSSH(ctx, cfg.Addr, sshConfig)
