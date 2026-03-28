@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"github.com/jamesits/machineproxy/pkg/agentproto"
@@ -77,7 +78,11 @@ func (r *AgentRunner) Run(ctx context.Context, req Request, stdin io.Reader, std
 		attrs := make([]any, 0, len(entry.Attrs)*2+2)
 		attrs = append(attrs, "source", "agent")
 		for _, kv := range entry.Attrs {
-			attrs = append(attrs, kv)
+			if k, v, ok := strings.Cut(kv, "="); ok {
+				attrs = append(attrs, k, v)
+			} else {
+				attrs = append(attrs, kv, "")
+			}
 		}
 		log.Log(ctx, slog.Level(entry.Level), entry.Msg, attrs...)
 	})
@@ -237,7 +242,11 @@ func (r *AgentRunner) RunWithControl(ctx context.Context, req Request, ctrl *Con
 		attrs := make([]any, 0, len(entry.Attrs)*2+2)
 		attrs = append(attrs, "source", "agent")
 		for _, kv := range entry.Attrs {
-			attrs = append(attrs, kv)
+			if k, v, ok := strings.Cut(kv, "="); ok {
+				attrs = append(attrs, k, v)
+			} else {
+				attrs = append(attrs, kv, "")
+			}
 		}
 		log.Log(ctx, slog.Level(entry.Level), entry.Msg, attrs...)
 	})

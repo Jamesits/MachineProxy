@@ -230,6 +230,25 @@ func (d *runtimeDeps) StartBroker(ctx context.Context) error {
 		}
 	}
 
+	// Build a path mapper that rewrites container-local paths to remote
+	// paths so the agent can chdir and exec correctly on the remote host.
+	mount, _ := config.ParseMount(d.cfg.Container.Mounts[0])
+	var pathMapper func(string) string
+	if mount.ContainerPath != mount.RemotePath {
+		containerPrefix := mount.ContainerPath
+		remotePrefix := mount.RemotePath
+		pathMapper = func(p string) string {
+			if p == containerPrefix {
+				return remotePrefix
+			}
+			// Match containerPrefix/ to avoid partial prefix matches.
+			if strings.HasPrefix(p, containerPrefix+"/") {
+				return remotePrefix + p[len(containerPrefix):]
+			}
+			return p
+		}
+	}
+
 	brokerLog := d.log.With("component", "broker")
 	envKeep := d.cfg.Agent.EnvKeep
 	envRemove := d.cfg.Agent.EnvRemove
@@ -247,7 +266,8 @@ func (d *runtimeDeps) StartBroker(ctx context.Context) error {
 		EnvFilter: func(env []string) []string {
 			return envfilter.Filter(env, envKeep, envRemove)
 		},
-		Log: brokerLog,
+		PathMapper: pathMapper,
+		Log:        brokerLog,
 	})
 	bctx, cancel := context.WithCancel(ctx)
 	d.brokerCtxCancel = cancel

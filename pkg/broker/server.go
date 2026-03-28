@@ -18,7 +18,10 @@ import (
 type Deps struct {
 	Remote    remoteexec.Runner
 	EnvFilter func(env []string) []string // nil means pass through unfiltered
-	Log       *slog.Logger
+	// PathMapper translates container-local paths to remote-side paths.
+	// Used to rewrite Cwd and Path when ContainerPath != RemotePath.
+	PathMapper func(string) string // nil means no translation
+	Log        *slog.Logger
 }
 
 type Server struct {
@@ -82,6 +85,13 @@ func (s *Server) serveConn(ctx context.Context, conn net.Conn) {
 
 	if s.deps.EnvFilter != nil {
 		req.Env = s.deps.EnvFilter(req.Env)
+	}
+
+	// Translate container paths to remote paths so the agent can
+	// resolve the working directory and binary on the remote host.
+	if s.deps.PathMapper != nil {
+		req.Cwd = s.deps.PathMapper(req.Cwd)
+		req.Path = s.deps.PathMapper(req.Path)
 	}
 
 	stdinReader, stdinWriter := io.Pipe()

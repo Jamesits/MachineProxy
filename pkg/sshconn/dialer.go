@@ -27,6 +27,7 @@ func NewDialFunc(cfg DialConfig) (func(ctx context.Context) (Conn, error), error
 	}
 
 	algorithms := ssh.SupportedAlgorithms()
+	// TODO: differenciate ssh.InsecureAlgorithms()
 	sshConfig := &ssh.ClientConfig{
 		User:              cfg.User,
 		Auth:              []ssh.AuthMethod{ssh.PublicKeys(signer)},
