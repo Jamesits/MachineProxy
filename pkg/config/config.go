@@ -64,8 +64,9 @@ type Config struct {
 
 	Container struct {
 		LocalCommands []string `yaml:"local_commands"`
-		Mounts        []string `yaml:"mounts"`     // docker-compose style: [local:]remote
-		EnvRemove     []string `yaml:"env_remove"`  // glob/regex patterns for env vars to strip from the container process
+		Mounts        []string `yaml:"mounts"`      // docker-compose style: [local:]remote
+		WorkingDir    string   `yaml:"working_dir"`  // override container working directory; defaults to first mount's local path
+		EnvRemove     []string `yaml:"env_remove"`   // glob/regex patterns for env vars to strip from the container process
 	} `yaml:"container"`
 
 	Agent struct {
@@ -172,6 +173,9 @@ func (c *Config) Validate() error {
 		if _, err := ParseMount(m); err != nil {
 			return fmt.Errorf("container.mounts: %w", err)
 		}
+	}
+	if c.Container.WorkingDir != "" && !filepath.IsAbs(c.Container.WorkingDir) {
+		return errors.New("container.working_dir must be absolute")
 	}
 	if len(c.Container.LocalCommands) == 0 {
 		return errors.New("container.local_commands must not be empty")

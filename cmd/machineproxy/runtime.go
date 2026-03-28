@@ -327,6 +327,12 @@ func (d *runtimeDeps) RunChild(ctx context.Context, cmdline []string) error {
 	// Parse the first mount entry for container path binding.
 	mount, _ := config.ParseMount(d.cfg.Container.Mounts[0])
 
+	// Use explicit working_dir if set, otherwise default to the first mount's local path.
+	workingDir := d.cfg.Container.WorkingDir
+	if workingDir == "" {
+		workingDir = mount.ContainerPath
+	}
+
 	// Wrap the command in the ptrace-based tracer so exec interception
 	// works with both dynamically and statically linked binaries.
 	tracerArgs := []string{
@@ -342,7 +348,7 @@ func (d *runtimeDeps) RunChild(ctx context.Context, cmdline []string) error {
 	tracerArgs = append(tracerArgs, cmdline...)
 
 	d.log.Log(ctx, logging.LevelTrace, "launching child via tracer", "tracer", tracerBin, "command", cmdline)
-	return d.namespace.Run(ctx, d.fuseMountDir, mount.ContainerPath, tracerArgs, env)
+	return d.namespace.Run(ctx, d.fuseMountDir, mount.ContainerPath, workingDir, tracerArgs, env)
 }
 
 func currentUsername() (string, error) {

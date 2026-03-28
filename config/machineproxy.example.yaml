@@ -21,6 +21,7 @@ container:
   #   env             — basename match (last segment of the executable path)
   local_commands:
     - /usr/bin/env
+  # working_dir: /workspace
   # Docker-compose style mounts: [local_path:]remote_path
   # A single path means the same path is used on both remote and container.
   mounts:

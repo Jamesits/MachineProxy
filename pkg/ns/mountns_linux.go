@@ -50,11 +50,12 @@ func (n *Namespace) Prepare(ctx context.Context) error {
 // Run executes cmdline inside a bwrap sandbox. The host root is
 // bind-mounted read-write, and fuseMountDir is bound over containerPath
 // so the FUSE workspace is visible at the expected location.
-func (n *Namespace) Run(ctx context.Context, fuseMountDir, containerPath string, cmdline []string, env []string) error {
+// workingDir sets the initial working directory inside the container.
+func (n *Namespace) Run(ctx context.Context, fuseMountDir, containerPath, workingDir string, cmdline []string, env []string) error {
 	args := []string{
 		"--dev-bind", "/", "/",
 		"--bind", fuseMountDir, containerPath,
-		"--chdir", containerPath,
+		"--chdir", workingDir,
 		"--die-with-parent",
 	}
 	args = append(args, cmdline...)
@@ -73,11 +74,11 @@ func (n *Namespace) Run(ctx context.Context, fuseMountDir, containerPath string,
 
 // Command returns the bwrap binary path and full argument list without
 // executing anything. Useful for inspection and testing.
-func (n *Namespace) Command(fuseMountDir, containerPath string, cmdline []string) (string, []string) {
+func (n *Namespace) Command(fuseMountDir, containerPath, workingDir string, cmdline []string) (string, []string) {
 	args := []string{
 		"--dev-bind", "/", "/",
 		"--bind", fuseMountDir, containerPath,
-		"--chdir", containerPath,
+		"--chdir", workingDir,
 		"--die-with-parent",
 	}
 	args = append(args, cmdline...)
