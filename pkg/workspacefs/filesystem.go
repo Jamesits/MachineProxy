@@ -54,10 +54,6 @@ func New(sftp SFTPClient, root string, log *slog.Logger) *FileSystem {
 	return &FileSystem{root: cleanRoot, sftp: sftp, log: log}
 }
 
-func (f *FileSystem) Root() string {
-	return f.root
-}
-
 func (f *FileSystem) ReadFile(ctx context.Context, rel string, off int64, size int) ([]byte, syscall.Errno) {
 	f.log.Log(ctx, logging.LevelTrace, "fuse read", "path", rel, "offset", off, "size", size)
 

@@ -157,9 +157,3 @@ func envName(entry string) string {
 	}
 	return entry
 }
-
-// matchesAny returns true if name matches any of the glob/regex patterns.
-// Kept for backward compatibility; new code should use compileAll + matchesAnyCompiled.
-func matchesAny(name string, patterns []string) bool {
-	return matchesAnyCompiled(name, compileAll(patterns))
-}

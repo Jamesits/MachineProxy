@@ -65,8 +65,8 @@ type Config struct {
 	Container struct {
 		LocalCommands []string `yaml:"local_commands"`
 		Mounts        []string `yaml:"mounts"`      // docker-compose style: [local:]remote
-		WorkingDir    string   `yaml:"working_dir"`  // override container working directory; defaults to first mount's local path
-		EnvRemove     []string `yaml:"env_remove"`   // glob/regex patterns for env vars to strip from the container process
+		WorkingDir    string   `yaml:"working_dir"` // override container working directory; defaults to first mount's local path
+		EnvRemove     []string `yaml:"env_remove"`  // glob/regex patterns for env vars to strip from the container process
 	} `yaml:"container"`
 
 	Agent struct {
@@ -75,9 +75,9 @@ type Config struct {
 	} `yaml:"agent"`
 
 	Components struct {
-		ShimPath       string `yaml:"shim_path"`
-		TracerPath     string `yaml:"tracer_path"`
-		AgentLocalPath string `yaml:"agent_local_path"`
+		ShimPath        string `yaml:"shim_path"`
+		TracerPath      string `yaml:"tracer_path"`
+		AgentLocalPath  string `yaml:"agent_local_path"`
 		AgentRemotePath string `yaml:"agent_remote_path"`
 	} `yaml:"components"`
 

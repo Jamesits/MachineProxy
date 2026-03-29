@@ -13,9 +13,9 @@ import (
 // childPipes holds the agent-side ends of pipes/socketpairs connected
 // to the child process.
 type childPipes struct {
-	stdin  *os.File // write end → child stdin
-	stdout *os.File // read end ← child stdout
-	stderr *os.File // read end ← child stderr
+	stdin  *os.File            // write end → child stdin
+	stdout *os.File            // read end ← child stdout
+	stderr *os.File            // read end ← child stderr
 	extra  map[uint32]*os.File // read/write end for each extra fd
 }
 

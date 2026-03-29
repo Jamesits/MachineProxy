@@ -61,17 +61,8 @@ func (m *Mux) RegisterStream(id uint32, h StreamHandler) {
 	m.streams[id] = h
 }
 
-// OnExec sets the callback for FrameExec messages.
-func (m *Mux) OnExec(fn func(*ExecMsg)) { m.onExec = fn }
-
 // OnSignal sets the callback for FrameSignal messages.
 func (m *Mux) OnSignal(fn func(int)) { m.onSignal = fn }
-
-// OnExit sets the callback for FrameExit messages.
-func (m *Mux) OnExit(fn func(code int, errStr string)) { m.onExit = fn }
-
-// OnError sets the callback for FrameError messages.
-func (m *Mux) OnError(fn func(errStr string)) { m.onError = fn }
 
 // OnLog sets the callback for FrameLog messages (agent log forwarding).
 func (m *Mux) OnLog(fn func(*LogEntry)) { m.onLog = fn }

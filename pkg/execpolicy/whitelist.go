@@ -3,7 +3,6 @@ package execpolicy
 import (
 	"fmt"
 	"path/filepath"
-	"strings"
 )
 
 type Whitelist struct {
@@ -20,13 +19,6 @@ func NewWhitelist(paths []string) (*Whitelist, error) {
 		entries[clean] = struct{}{}
 	}
 	return &Whitelist{entries: entries}, nil
-}
-
-func FromEnv(list string) (*Whitelist, error) {
-	if strings.TrimSpace(list) == "" {
-		return NewWhitelist(nil)
-	}
-	return NewWhitelist(strings.Split(list, ":"))
 }
 
 func (w *Whitelist) Allows(path string) bool {

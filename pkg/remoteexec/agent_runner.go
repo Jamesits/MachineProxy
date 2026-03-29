@@ -18,7 +18,7 @@ import (
 type AgentRunner struct {
 	Provider    SessionProvider
 	Transferer  *agenttransfer.Transferer
-	Recorder    *agentproto.Recorder // nil disables recording
+	Recorder    *agentproto.Recorder    // nil disables recording
 	AgentConfig *agentproto.AgentConfig // sent to agent before exec; nil skips
 	Log         *slog.Logger
 }
@@ -359,6 +359,6 @@ func (r *AgentRunner) RunWithControl(ctx context.Context, req Request, ctrl *Con
 
 // Verify interface compliance.
 var (
-	_ Runner          = (*AgentRunner)(nil)
+	_ Runner           = (*AgentRunner)(nil)
 	_ SignalableRunner = (*AgentRunner)(nil)
 )

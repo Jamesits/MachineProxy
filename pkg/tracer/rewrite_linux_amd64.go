@@ -18,7 +18,7 @@ const (
 //   - Rdi = pathname pointer
 //   - Rsi = argv pointer
 //   - Rdx = envp pointer
-//   For execveat(dirfd, pathname, argv, envp, flags):
+//     For execveat(dirfd, pathname, argv, envp, flags):
 //   - Rdi = dirfd
 //   - Rsi = pathname pointer
 //   - Rdx = argv pointer
@@ -28,9 +28,9 @@ type SyscallRegs struct {
 	regs unix.PtraceRegs
 }
 
-func SeccompArch() uint32    { return auditArchX86_64 }
-func SysExecve() uint32     { return sysExecve }
-func SysExecveat() uint32   { return sysExecveat }
+func SeccompArch() uint32 { return auditArchX86_64 }
+func SysExecve() uint32   { return sysExecve }
+func SysExecveat() uint32 { return sysExecveat }
 
 // GetRegs reads the tracee's register state.
 func GetRegs(pid int) (*SyscallRegs, error) {

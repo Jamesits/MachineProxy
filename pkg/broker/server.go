@@ -130,10 +130,10 @@ func (s *Server) serveConn(ctx context.Context, conn net.Conn) {
 			go s.streamPipe(&streamWG, localR, fdStream, send)
 
 			extraFDPipes[fdNum] = &fdPipePair{
-				Reader:     remoteR,
-				Writer:     localW,
-				remoteW:    remoteW,
-				closeOnce:  sync.Once{},
+				Reader:    remoteR,
+				Writer:    localW,
+				remoteW:   remoteW,
+				closeOnce: sync.Once{},
 			}
 
 			// We store remoteW so readFrames can write to it.
@@ -283,8 +283,8 @@ func (s *Server) streamPipe(wg *sync.WaitGroup, r *io.PipeReader, stream string,
 // Read returns data coming from the remote (agent → broker).
 // Write sends data to the local shim (broker → shim, via streamPipe).
 type fdPipePair struct {
-	io.Reader              // remote read end (data from agent)
-	io.Writer              // local write end (data to streamPipe → shim)
+	io.Reader                // remote read end (data from agent)
+	io.Writer                // local write end (data to streamPipe → shim)
 	remoteW   *io.PipeWriter // write end for data from shim → agent
 	closeOnce sync.Once
 }

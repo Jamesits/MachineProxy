@@ -1,35 +1,12 @@
 package tracer
 
 import (
-	"bytes"
-	"fmt"
-	"os"
 	"strings"
 )
 
 // EnvBaseline holds a snapshot of the environment for computing diffs.
 type EnvBaseline struct {
 	entries map[string]string // key → "KEY=VALUE"
-}
-
-// NewEnvBaseline reads the environment from /proc/pid/environ.
-func NewEnvBaseline(pid int) (*EnvBaseline, error) {
-	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", pid))
-	if err != nil {
-		return nil, err
-	}
-
-	b := &EnvBaseline{entries: make(map[string]string)}
-	for _, entry := range bytes.Split(data, []byte{0}) {
-		s := string(entry)
-		if s == "" {
-			continue
-		}
-		if idx := strings.IndexByte(s, '='); idx >= 0 {
-			b.entries[s[:idx]] = s
-		}
-	}
-	return b, nil
 }
 
 // NewEnvBaselineFromSlice creates a baseline from a string slice (e.g. os.Environ()).

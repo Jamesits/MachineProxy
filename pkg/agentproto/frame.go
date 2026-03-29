@@ -17,20 +17,20 @@ const (
 // Frame is a single message on the CBOR mux. Fields are omitted when
 // zero-valued so only the relevant subset appears on the wire.
 type Frame struct {
-	Type   FrameType `cbor:"t"`
-	Stream uint32    `cbor:"s,omitempty"` // 0=stdin, 1=stdout, 2=stderr, 3+=extra fds
-	Data   []byte    `cbor:"d,omitempty"`
-	Signal int       `cbor:"sig,omitempty"`
-	Code   int       `cbor:"c,omitempty"`
-	Error  string    `cbor:"e,omitempty"`
-	Exec   *ExecMsg      `cbor:"x,omitempty"`
-	Log    *LogEntry     `cbor:"l,omitempty"`
-	Config *AgentConfig  `cbor:"cfg,omitempty"`
+	Type   FrameType    `cbor:"t"`
+	Stream uint32       `cbor:"s,omitempty"` // 0=stdin, 1=stdout, 2=stderr, 3+=extra fds
+	Data   []byte       `cbor:"d,omitempty"`
+	Signal int          `cbor:"sig,omitempty"`
+	Code   int          `cbor:"c,omitempty"`
+	Error  string       `cbor:"e,omitempty"`
+	Exec   *ExecMsg     `cbor:"x,omitempty"`
+	Log    *LogEntry    `cbor:"l,omitempty"`
+	Config *AgentConfig `cbor:"cfg,omitempty"`
 }
 
 // LogEntry carries a structured log record from the agent.
 type LogEntry struct {
-	Level int      `cbor:"lvl"`          // slog.Level value
+	Level int      `cbor:"lvl"` // slog.Level value
 	Msg   string   `cbor:"msg"`
 	Attrs []string `cbor:"a,omitempty"` // key=value pairs
 }
