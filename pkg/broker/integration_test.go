@@ -16,28 +16,23 @@ import (
 func testBrokerServer(t *testing.T) *Server {
 	t.Helper()
 
-	addr := os.Getenv("MPROXY_TEST_SSH_ADDR")
-	keyPath := os.Getenv("MPROXY_TEST_SSH_KEY")
-	if addr == "" || keyPath == "" {
-		t.Skip("set MPROXY_TEST_SSH_ADDR and MPROXY_TEST_SSH_KEY to run integration tests")
+	host := os.Getenv("MPROXY_TEST_SSH_HOST")
+	if host == "" {
+		t.Skip("set MPROXY_TEST_SSH_HOST to run integration tests; identity is resolved via ~/.ssh/config")
 	}
 	user := os.Getenv("MPROXY_TEST_SSH_USER")
-	if user == "" {
-		user = "root"
-	}
 
-	dial, err := sshconn.NewDialFunc(sshconn.DialConfig{
-		Addr:           addr,
-		User:           user,
-		PrivateKeyPath: keyPath,
-		Timeout:        5 * time.Second,
+	dialer, err := sshconn.NewDialer(sshconn.DialConfig{
+		Host:    host,
+		User:    user,
+		Timeout: 5 * time.Second,
 	})
 	if err != nil {
-		t.Fatalf("NewDialFunc: %v", err)
+		t.Fatalf("NewDialer: %v", err)
 	}
 
 	mgr := sshconn.NewManager(sshconn.Options{
-		Dial:              dial,
+		Dial:              dialer.Dial,
 		ReconnectInterval: 500 * time.Millisecond,
 	})
 	ctx := context.Background()

@@ -2,6 +2,7 @@ package sshconn
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -10,26 +11,29 @@ import (
 func testDialFunc(t *testing.T) func(context.Context) (Conn, error) {
 	t.Helper()
 
-	addr := os.Getenv("MPROXY_TEST_SSH_ADDR")
-	keyPath := os.Getenv("MPROXY_TEST_SSH_KEY")
-	if addr == "" || keyPath == "" {
-		t.Skip("set MPROXY_TEST_SSH_ADDR and MPROXY_TEST_SSH_KEY to run integration tests")
+	host := os.Getenv("MPROXY_TEST_SSH_HOST")
+	if host == "" {
+		t.Skip("set MPROXY_TEST_SSH_HOST to run integration tests; identity is resolved via ~/.ssh/config")
 	}
 	user := os.Getenv("MPROXY_TEST_SSH_USER")
-	if user == "" {
-		user = "root"
+	port := 0
+	if p := os.Getenv("MPROXY_TEST_SSH_PORT"); p != "" {
+		_, err := fmt.Sscanf(p, "%d", &port)
+		if err != nil {
+			t.Fatalf("parse MPROXY_TEST_SSH_PORT: %v", err)
+		}
 	}
 
-	dial, err := NewDialFunc(DialConfig{
-		Addr:           addr,
-		User:           user,
-		PrivateKeyPath: keyPath,
-		Timeout:        5 * time.Second,
+	dialer, err := NewDialer(DialConfig{
+		Host:    host,
+		User:    user,
+		Port:    port,
+		Timeout: 5 * time.Second,
 	})
 	if err != nil {
-		t.Fatalf("NewDialFunc: %v", err)
+		t.Fatalf("NewDialer: %v", err)
 	}
-	return dial
+	return dialer.Dial
 }
 
 func TestIntegrationDial(t *testing.T) {

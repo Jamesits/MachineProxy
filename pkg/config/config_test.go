@@ -9,9 +9,8 @@ func TestLoadRejectsEmptyLocalCommands(t *testing.T) {
 	raw := `
 remote:
   ssh:
-    addr: 127.0.0.1:22
+    host: 127.0.0.1
     user: dev
-    private_key_path: /tmp/id_ed25519
 container:
   local_commands: []
   mounts:
@@ -28,10 +27,9 @@ func TestLoadParsesConfig(t *testing.T) {
 	raw := `
 remote:
   ssh:
-    addr: 127.0.0.1:22
+    host: 127.0.0.1
     user: dev
-    private_key_path: /tmp/id_ed25519
-    keep_alive: 15s
+    port: 2222
   os: linux
   arch: arm64
 container:
@@ -46,8 +44,11 @@ container:
 		t.Fatalf("Load() error = %v", err)
 	}
 
-	if cfg.Remote.SSH.KeepAlive.String() != "15s" {
-		t.Fatalf("expected keepalive 15s, got %s", cfg.Remote.SSH.KeepAlive)
+	if cfg.Remote.SSH.Host != "127.0.0.1" {
+		t.Fatalf("expected host 127.0.0.1, got %s", cfg.Remote.SSH.Host)
+	}
+	if cfg.Remote.SSH.Port != 2222 {
+		t.Fatalf("expected port 2222, got %d", cfg.Remote.SSH.Port)
 	}
 	if len(cfg.Container.LocalCommands) != 1 || cfg.Container.LocalCommands[0] != "/usr/bin/env" {
 		t.Fatalf("unexpected local_commands: %#v", cfg.Container.LocalCommands)
@@ -61,9 +62,8 @@ func TestLoadParsesAgentEnvConfig(t *testing.T) {
 	raw := `
 remote:
   ssh:
-    addr: 127.0.0.1:22
+    host: 127.0.0.1
     user: dev
-    private_key_path: /tmp/id_ed25519
 container:
   local_commands:
     - /usr/bin/env
@@ -99,9 +99,8 @@ func TestLoadDefaultsAgentEnv(t *testing.T) {
 	raw := `
 remote:
   ssh:
-    addr: 127.0.0.1:22
+    host: 127.0.0.1
     user: dev
-    private_key_path: /tmp/id_ed25519
 container:
   local_commands:
     - /usr/bin/env
@@ -129,9 +128,8 @@ func TestLoadParsesContainerEnvRemove(t *testing.T) {
 	raw := `
 remote:
   ssh:
-    addr: 127.0.0.1:22
+    host: 127.0.0.1
     user: dev
-    private_key_path: /tmp/id_ed25519
 container:
   local_commands:
     - /usr/bin/env
@@ -241,9 +239,8 @@ func TestLoadAcceptsAllLocalCommandForms(t *testing.T) {
 	raw := `
 remote:
   ssh:
-    addr: 127.0.0.1:22
+    host: 127.0.0.1
     user: dev
-    private_key_path: /tmp/id_ed25519
 container:
   local_commands:
     - /usr/bin/env
@@ -266,9 +263,8 @@ func TestLoadRejectsMiddleSlashLocalCommand(t *testing.T) {
 	raw := `
 remote:
   ssh:
-    addr: 127.0.0.1:22
+    host: 127.0.0.1
     user: dev
-    private_key_path: /tmp/id_ed25519
 container:
   local_commands:
     - usr/bin/env
@@ -320,9 +316,8 @@ func TestLoadRejectsEmptyMounts(t *testing.T) {
 	raw := `
 remote:
   ssh:
-    addr: 127.0.0.1:22
+    host: 127.0.0.1
     user: dev
-    private_key_path: /tmp/id_ed25519
 container:
   local_commands:
     - /usr/bin/env

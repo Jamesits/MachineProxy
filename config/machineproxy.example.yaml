@@ -3,11 +3,14 @@ log_level: info
 
 remote:
   ssh:
-    addr: remote.server.example.com:22
-    user: dev
-    private_key_path: /home/dev/.ssh/id_ed25519
-    known_hosts_path: /home/dev/.ssh/known_hosts
-    keep_alive: 20s
+    # host can be either a literal hostname/IP or a Host alias defined in
+    # ~/.ssh/config. Identity keys, known_hosts, algorithms and keepalive
+    # intervals are resolved from the user's ssh_config.
+    host: remote.server.example.com
+    # user and port are optional; when set, they override the values
+    # resolved from ssh_config.
+    # user: dev
+    # port: 22
   # Remote host OS and architecture for agent binary resolution.
   # Defaults to the local machine's runtime.GOOS / runtime.GOARCH.
   # os: linux

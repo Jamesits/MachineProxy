@@ -29,6 +29,7 @@ type runtimeDeps struct {
 	cfg *config.Config
 	log *slog.Logger
 
+	sshAddr      string // resolved "host:port" after ssh_config lookup
 	sshManager   *sshconn.Manager
 	namespace    *ns.Namespace
 	fuseServer   *fuse.Server
@@ -42,24 +43,24 @@ type runtimeDeps struct {
 
 func newRuntimeDeps(cfg *config.Config, log *slog.Logger) (*runtimeDeps, error) {
 	sshLog := log.With("component", "ssh")
-	dial, err := sshconn.NewDialFunc(sshconn.DialConfig{
-		Addr:           cfg.Remote.SSH.Addr,
-		User:           cfg.Remote.SSH.User,
-		PrivateKeyPath: cfg.Remote.SSH.PrivateKeyPath,
-		KnownHostsPath: cfg.Remote.SSH.KnownHostsPath,
-		Timeout:        10 * time.Second,
+	dialer, err := sshconn.NewDialer(sshconn.DialConfig{
+		Host:    cfg.Remote.SSH.Host,
+		User:    cfg.Remote.SSH.User,
+		Port:    cfg.Remote.SSH.Port,
+		Timeout: 10 * time.Second,
 	})
 	if err != nil {
 		return nil, err
 	}
 
 	return &runtimeDeps{
-		cfg: cfg,
-		log: log,
+		cfg:     cfg,
+		log:     log,
+		sshAddr: dialer.Addr,
 		sshManager: sshconn.NewManager(sshconn.Options{
-			Dial:              dial,
+			Dial:              dialer.Dial,
 			ReconnectInterval: time.Second,
-			KeepAliveInterval: cfg.Remote.SSH.KeepAlive,
+			KeepAliveInterval: dialer.KeepAliveInterval,
 			Log:               sshLog,
 		}),
 		namespace: ns.New(ns.Deps{Log: log.With("component", "ns")}),
@@ -101,7 +102,7 @@ func (d *runtimeDeps) Close() {
 }
 
 func (d *runtimeDeps) StartSSH(ctx context.Context) error {
-	d.log.Log(ctx, logging.LevelTrace, "starting ssh manager", "addr", d.cfg.Remote.SSH.Addr, "user", d.cfg.Remote.SSH.User)
+	d.log.Log(ctx, logging.LevelTrace, "starting ssh manager", "addr", d.sshAddr, "user", d.cfg.Remote.SSH.User)
 	if err := d.sshManager.Start(ctx); err != nil {
 		return err
 	}
@@ -113,7 +114,7 @@ func (d *runtimeDeps) StartSSH(ctx context.Context) error {
 
 	for {
 		if d.sshManager.IsConnected() {
-			d.log.Debug("ssh connected", "addr", d.cfg.Remote.SSH.Addr)
+			d.log.Debug("ssh connected", "addr", d.sshAddr)
 			return nil
 		}
 		select {
@@ -222,7 +223,7 @@ func (d *runtimeDeps) StartBroker(ctx context.Context) error {
 			StartTime: time.Now().UnixNano(),
 			LocalUser: username,
 			LocalPID:  os.Getpid(),
-			SSHAddr:   d.cfg.Remote.SSH.Addr,
+			SSHAddr:   d.sshAddr,
 			SSHUser:   d.cfg.Remote.SSH.User,
 			AgentPath: d.cfg.Components.AgentRemotePath,
 		}); err != nil {

@@ -8,7 +8,6 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
-	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -51,12 +50,14 @@ type Config struct {
 	LogLevel string `yaml:"log_level"` // trace, debug, info, warn, error
 
 	Remote struct {
+		// SSH is resolved via the user's ssh_config (see ssh_config(5)).
+		// Host accepts either a literal hostname/IP or a Host alias defined
+		// in ~/.ssh/config; User and Port, when set, override the resolved
+		// values from ssh_config.
 		SSH struct {
-			Addr           string        `yaml:"addr"`
-			User           string        `yaml:"user"`
-			PrivateKeyPath string        `yaml:"private_key_path"`
-			KnownHostsPath string        `yaml:"known_hosts_path"`
-			KeepAlive      time.Duration `yaml:"keep_alive"`
+			Host string `yaml:"host"`
+			User string `yaml:"user"`
+			Port int    `yaml:"port"`
 		} `yaml:"ssh"`
 		OS   string `yaml:"os"`   // remote OS for agent binary resolution; defaults to runtime.GOOS
 		Arch string `yaml:"arch"` // remote arch for agent binary resolution; defaults to runtime.GOARCH
@@ -107,9 +108,6 @@ func (c *Config) applyDefaults() error {
 	if c.LogLevel == "" {
 		c.LogLevel = "info"
 	}
-	if c.Remote.SSH.KeepAlive == 0 {
-		c.Remote.SSH.KeepAlive = 20 * time.Second
-	}
 	if c.Remote.OS == "" {
 		c.Remote.OS = runtime.GOOS
 	}
@@ -157,14 +155,11 @@ func (c *Config) Validate() error {
 	default:
 		return fmt.Errorf("log_level must be one of trace, debug, info, warn, error; got %q", c.LogLevel)
 	}
-	if c.Remote.SSH.Addr == "" {
-		return errors.New("remote.ssh.addr is required")
+	if c.Remote.SSH.Host == "" {
+		return errors.New("remote.ssh.host is required")
 	}
-	if c.Remote.SSH.User == "" {
-		return errors.New("remote.ssh.user is required")
-	}
-	if c.Remote.SSH.PrivateKeyPath == "" {
-		return errors.New("remote.ssh.private_key_path is required")
+	if c.Remote.SSH.Port < 0 || c.Remote.SSH.Port > 65535 {
+		return fmt.Errorf("remote.ssh.port must be between 0 and 65535; got %d", c.Remote.SSH.Port)
 	}
 	if len(c.Container.Mounts) == 0 {
 		return errors.New("container.mounts must not be empty")
