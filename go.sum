@@ -4,8 +4,8 @@ github.com/fxamacker/cbor/v2 v2.9.0 h1:NpKPmjDBgUfBms6tr6JZkTHtfFGcMKsw3eGcmD/sa
 github.com/fxamacker/cbor/v2 v2.9.0/go.mod h1:vM4b+DJCtHn+zz7h3FFp/hDAI9WNWCsZj23V5ytsSxQ=
 github.com/hanwen/go-fuse/v2 v2.9.0 h1:0AOGUkHtbOVeyGLr0tXupiid1Vg7QB7M6YUcdmVdC58=
 github.com/hanwen/go-fuse/v2 v2.9.0/go.mod h1:yE6D2PqWwm3CbYRxFXV9xUd8Md5d6NG0WBs5spCswmI=
-github.com/jamesits/sshconf v0.0.0-20260410154415-e4a9bb597e36 h1:b8+V7E5osH+S5GhlJaXAHbirH/1z9q+huOzVUsxKxmg=
-github.com/jamesits/sshconf v0.0.0-20260410154415-e4a9bb597e36/go.mod h1:VNglwfi3LxsSsQy4ifvF49I4SY3DLxV+Y5AdRjUzGlo=
+github.com/jamesits/sshconf v0.0.0-20260411150724-60c362490b4d h1:bvxssxNfIf1uVWDZeZgEq4x7ANYoSL4suIkcD6xMnjg=
+github.com/jamesits/sshconf v0.0.0-20260411150724-60c362490b4d/go.mod h1:VNglwfi3LxsSsQy4ifvF49I4SY3DLxV+Y5AdRjUzGlo=
 github.com/kr/fs v0.1.0 h1:Jskdu9ieNAYnjxsi0LbQp1ulIKZV1LAFgK1tWhpZgl8=
 github.com/kr/fs v0.1.0/go.mod h1:FFnZGqtBN9Gxj7eW1uZ42v5BccTP0vu6NEaFoC2HwRg=
 github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0SNc=

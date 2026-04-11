@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jamesits/sshconf/pkg/client"
+	"github.com/jamesits/sshconf/pkg/sshclient"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
@@ -52,7 +52,7 @@ func NewDialer(cfg DialConfig) (*Dialer, error) {
 		return nil, errors.New("ssh host is required")
 	}
 
-	lookup := &client.Lookup{
+	lookup := &sshclient.Lookup{
 		Host: cfg.Host,
 		User: cfg.User,
 		Port: cfg.Port,
@@ -72,7 +72,7 @@ func NewDialer(cfg DialConfig) (*Dialer, error) {
 		opts.ConnectTimeout = &secs
 	}
 
-	sshConfig, err := opts.SSHClientConfig(client.Callbacks{}, client.Handlers{})
+	sshConfig, err := opts.SSHClientConfig(sshclient.Handlers{})
 	if err != nil {
 		return nil, fmt.Errorf("build ssh client config: %w", err)
 	}
