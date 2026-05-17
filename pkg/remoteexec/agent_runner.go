@@ -24,147 +24,21 @@ type AgentRunner struct {
 }
 
 func (r *AgentRunner) logger() *slog.Logger {
-	if r.Log != nil {
+	if r != nil && r.Log != nil {
 		return r.Log
 	}
 	return slog.Default()
 }
 
 func (r *AgentRunner) Run(ctx context.Context, req Request, stdin io.Reader, stdout io.Writer, stderr io.Writer) (int, error) {
-	log := r.logger()
-	if r == nil || r.Provider == nil {
-		return 127, fmt.Errorf("agent runner provider is nil")
-	}
-
-	agentPath, err := r.Transferer.Ensure()
-	if err != nil {
-		return 127, fmt.Errorf("ensure agent binary: %w", err)
-	}
-
-	log.Debug("opening ssh session for agent")
-	session, err := r.Provider.NewSession(ctx)
-	if err != nil {
-		return 127, err
-	}
-	defer session.Close()
-
-	sessIn, err := session.StdinPipe()
-	if err != nil {
-		return 127, err
-	}
-	sessOut, err := session.StdoutPipe()
-	if err != nil {
-		return 127, err
-	}
-	sessErr, err := session.StderrPipe()
-	if err != nil {
-		return 127, err
-	}
-
-	if err := session.Start(shellQuote(agentPath)); err != nil {
-		return 127, fmt.Errorf("start agent: %w", err)
-	}
-	log.Debug("agent started", "agent_path", agentPath)
-
-	// Drain agent diagnostic output (its stderr) to our stderr.
-	go func() {
-		_, _ = io.Copy(stderr, sessErr)
-	}()
-
-	mux := agentproto.NewMux(sessOut, sessIn)
-
-	// Forward agent log frames to our local logger.
-	mux.OnLog(func(entry *agentproto.LogEntry) {
-		attrs := make([]any, 0, len(entry.Attrs)*2+2)
-		attrs = append(attrs, "source", "agent")
-		for _, kv := range entry.Attrs {
-			if k, v, ok := strings.Cut(kv, "="); ok {
-				attrs = append(attrs, k, v)
-			} else {
-				attrs = append(attrs, kv, "")
-			}
-		}
-		log.Log(ctx, slog.Level(entry.Level), entry.Msg, attrs...)
+	// The basic runner is the controlled runner without signals or extra fds;
+	// delegating keeps SSH/session lifecycle and recording behavior in one path.
+	return r.RunWithControl(ctx, req, &Control{
+		Stdin:    stdin,
+		Stdout:   stdout,
+		Stderr:   stderr,
+		ExtraFDs: map[uint32]io.ReadWriteCloser{},
 	})
-
-	// Send exec request.
-	execMsg := &agentproto.ExecMsg{
-		Path: req.Path,
-		Argv: req.Argv,
-		Env:  req.Env,
-		Cwd:  req.Cwd,
-	}
-
-	// Enable recording if configured.
-	var recSeq uint32
-	if r.Recorder != nil {
-		var recErr error
-		recSeq, recErr = r.Recorder.WriteCommandStart(execMsg)
-		if recErr == nil {
-			mux.SetRecorder(r.Recorder, recSeq)
-		} else {
-			log.Warn("failed to write command start record", "error", recErr)
-		}
-	}
-
-	// Send agent config before exec so the agent can apply its own filtering.
-	if r.AgentConfig != nil {
-		if err := mux.Send(&agentproto.Frame{
-			Type:   agentproto.FrameConfig,
-			Config: r.AgentConfig,
-		}); err != nil {
-			return 127, fmt.Errorf("send config frame: %w", err)
-		}
-	}
-
-	log.Log(ctx, logging.LevelTrace, "sending exec frame", "path", req.Path, "argv", req.Argv)
-	if err := mux.Send(&agentproto.Frame{
-		Type: agentproto.FrameExec,
-		Exec: execMsg,
-	}); err != nil {
-		return 127, fmt.Errorf("send exec frame: %w", err)
-	}
-
-	// Register handlers for stdout and stderr from the agent.
-	mux.RegisterStream(1, agentproto.WriterHandler(nopWriteCloser{stdout}))
-	mux.RegisterStream(2, agentproto.WriterHandler(nopWriteCloser{stderr}))
-
-	// Bridge local stdin → agent stream 0.
-	var stdinWG sync.WaitGroup
-	stdinWG.Add(1)
-	go func() {
-		defer stdinWG.Done()
-		bridgeReaderToMux(mux, 0, stdin)
-	}()
-
-	// Run the mux read loop. It returns when the agent sends FrameExit.
-	exitCode, muxErr := mux.ReadLoop(ctx)
-	log.Log(ctx, logging.LevelTrace, "mux read loop finished", "exit_code", exitCode, "error", muxErr)
-
-	// Close the session stdin to signal the agent that we're done.
-	_ = sessIn.Close()
-	// Unblock the stdin bridge goroutine: close the pipe reader so
-	// bridgeReaderToMux's Read returns instead of blocking forever.
-	if c, ok := stdin.(io.Closer); ok {
-		_ = c.Close()
-	}
-	stdinWG.Wait()
-
-	// Wait for the SSH session to finish.
-	if err := session.Wait(); err != nil {
-		log.Warn("ssh session wait error", "error", err)
-	}
-
-	if r.Recorder != nil {
-		if err := r.Recorder.WriteCommandEnd(recSeq, exitCode); err != nil {
-			log.Warn("failed to write command end record", "error", err)
-		}
-	}
-
-	if muxErr != nil && exitCode < 0 {
-		return 127, muxErr
-	}
-	return exitCode, nil
 }
 
 // bridgeReaderToMux reads from r and sends FrameData to the mux.
@@ -198,6 +72,9 @@ func (r *AgentRunner) RunWithControl(ctx context.Context, req Request, ctrl *Con
 	log := r.logger()
 	if r == nil || r.Provider == nil {
 		return 127, fmt.Errorf("agent runner provider is nil")
+	}
+	if r.Transferer == nil {
+		return 127, fmt.Errorf("agent runner transferer is nil")
 	}
 
 	agentPath, err := r.Transferer.Ensure()
