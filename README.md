@@ -92,7 +92,7 @@ The program is launched with a quasi-remote environment.
 
 ### Compatibility
 
-MachineProxy supports Linux only, for both local and remote devices.
+MachineProxy supports Linux only, for both local and remote devices. Golang runtime requires Linux 3.2 or later.
 
 MachineProxy is designed to work with most programs, including editors and CLI-based AI coding agents. Most use cases are covered, but edge cases exist and some may be impossible to fix completely.
 
