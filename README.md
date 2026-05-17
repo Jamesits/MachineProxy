@@ -9,6 +9,8 @@ MachineProxy creates a mixed-reality environment for your agent, or for any othe
 
 ## Usage
 
+Install [the latest package](https://github.com/Jamesits/MachineProxy/releases/latest) with your package manager of choice.
+
 Write a config file for your workspace:
 
 ```toml
@@ -24,7 +26,7 @@ host = "192.0.2.2"
 # user = "" # optional
 
 [container]
-# A list of programs that you want to run locally
+# A list of programs that you want to run locally (or unable to install onto the remote device)
 local_commands = [
     "amp",
     "codex",
