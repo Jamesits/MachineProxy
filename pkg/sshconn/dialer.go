@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/jamesits/sshconf/pkg/sshclient"
+	"github.com/jamesits/sshconf/pkg/stdio"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
@@ -72,7 +74,20 @@ func NewDialer(cfg DialConfig) (*Dialer, error) {
 		opts.ConnectTimeout = &secs
 	}
 
-	sshConfig, err := opts.SSHClientConfig(sshclient.Handlers{})
+	// Wire the sshconf-provided terminal UI so a StrictHostKeyChecking=ask
+	// prompt (plus password/passphrase/banner prompts) reaches the operator
+	// instead of failing the connection silently when a host key is new or
+	// changed.
+	tui := sshclient.NewTUI(stdio.NewTerminal(os.Stdin, os.Stdout, os.Stderr))
+	tui.Host = cfg.Host
+	if opts.User != nil {
+		tui.User = *opts.User
+	} else {
+		tui.User = cfg.User
+	}
+	handlers := sshclient.Handlers{UI: tui}
+
+	sshConfig, err := opts.SSHClientConfig(handlers)
 	if err != nil {
 		return nil, fmt.Errorf("build ssh client config: %w", err)
 	}
