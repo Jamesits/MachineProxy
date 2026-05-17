@@ -100,13 +100,13 @@ MachineProxy is designed to work with most programs, including editors and CLI-b
 
 DO NOT treat MachineProxy as a security barrier. Programs launched by MachineProxy can run commands on both the local and remote devices. Only run programs you trust, and only ask the AI to do things you trust it to do.
 
-#### Known Issues
+## Known Issues
 
-##### Shells
+### Shells
 
 Some shells (`sh`, Bash, etc.) maintain a command cache for quick lookups in `PATH`. If a command exists on the remote device but not on the local device, the shell may refuse to launch it. Use the full path (`/usr/bin/...`) to bypass the command cache instead.
 
-##### VSCode Terminal
+### VSCode Terminal
 
 VSCode Terminal seems to override `/usr/bin/env node` in some cases, causing some programs, such as [Amp](ampcode.com), to fail to launch. If you are using MachineProxy from a VSCode Terminal, run Node.js programs like this, using `amp` as an example:
 
