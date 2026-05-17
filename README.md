@@ -102,7 +102,7 @@ Some shells (`sh`, Bash, etc.) maintain a command cache for quick lookups in `PA
 
 ##### VSCode Terminal
 
-VSCode Terminal seems to override `/usr/bin/env node` in some cases, causing some programs, such as Amp from ampcode.com, to fail to launch. If you are using MachineProxy from a VSCode Terminal, run Node.js programs like this, using `amp` as an example:
+VSCode Terminal seems to override `/usr/bin/env node` in some cases, causing some programs, such as [Amp](ampcode.com), to fail to launch. If you are using MachineProxy from a VSCode Terminal, run Node.js programs like this, using `amp` as an example:
 
 ```shell
 machineproxy [...args] /usr/bin/node "$(which amp)" --no-ide
