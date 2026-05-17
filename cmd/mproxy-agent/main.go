@@ -86,7 +86,9 @@ func run() int {
 
 	if err := cmd.Start(); err != nil {
 		closePipes(pipes)
-		log.Error("start command failed", "error", err)
+		// Here we use warn not error, because sometimes TUI apps (I hate these but shrug) invokes non-existing programs
+		// in the background and this log breaks the TUI. Using warn level here allow the user to disable this log output.
+		log.Warn("start command failed", "error", err)
 		_ = mux.Send(&agentproto.Frame{
 			Type:  agentproto.FrameExit,
 			Code:  127,
