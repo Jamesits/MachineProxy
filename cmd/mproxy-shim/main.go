@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -50,6 +51,8 @@ func Run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 	defer conn.Close()
 
 	extraFDs := detectExtraFDs(conn)
+	extraFiles := newFDFileSet()
+	defer extraFiles.Close()
 
 	req := broker.ExecRequest{
 		Path:     args[1],
@@ -97,7 +100,7 @@ func Run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 	// Bridge extra fds (local → broker).
 	for _, fdNum := range extraFDs {
 		fdNum := fdNum
-		f := os.NewFile(uintptr(fdNum), fmt.Sprintf("fd/%d", fdNum))
+		f := extraFiles.Get(fdNum)
 		if f == nil {
 			continue
 		}
@@ -123,12 +126,46 @@ func Run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 			// Data from remote extra fd → write to local fd.
 			fdNumStr := frame.Stream[len(broker.StreamFDPrefix):]
 			if fd, err := strconv.ParseUint(fdNumStr, 10, 32); err == nil {
-				f := os.NewFile(uintptr(fd), fmt.Sprintf("fd/%d", fd))
+				f := extraFiles.Get(uint32(fd))
 				if f != nil && len(frame.Data) > 0 {
 					_, _ = f.Write(frame.Data)
 				}
 			}
 		}
+	}
+}
+
+type fdFileSet struct {
+	mu    sync.Mutex
+	files map[uint32]*os.File
+}
+
+func newFDFileSet() *fdFileSet {
+	return &fdFileSet{files: make(map[uint32]*os.File)}
+}
+
+func (s *fdFileSet) Get(fd uint32) *os.File {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if f := s.files[fd]; f != nil {
+		return f
+	}
+	// Keep one wrapper alive per descriptor for the whole shim lifetime. We do
+	// not own these inherited descriptors, so clear the finalizer to prevent the
+	// wrapper from closing streams that the target process still owns.
+	f := os.NewFile(uintptr(fd), fmt.Sprintf("fd/%d", fd))
+	if f != nil {
+		runtime.SetFinalizer(f, nil)
+		s.files[fd] = f
+	}
+	return f
+}
+
+func (s *fdFileSet) Close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for fd := range s.files {
+		delete(s.files, fd)
 	}
 }
 
