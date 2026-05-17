@@ -23,7 +23,9 @@ host = "remote.server.example.com"
 #   /usr/bin/env    — full absolute path match
 #   /^python.*/     — regex match (delimited by slashes)
 #   env             — basename match (last segment of the executable path)
-local_commands = ["/usr/bin/env"]
+local_commands = [
+    "/usr/bin/env",
+]
 # working_dir = "/workspace"
 
 # Docker Compose-style mounts: [local_path:]remote_path
@@ -36,7 +38,9 @@ mounts = [
 
 # Env vars to strip from the container process (the executable launched
 # by machineproxy directly). Patterns are globs or /regex/ delimited.
-# env_remove = ["MPROXY_*"]
+# env_remove = [
+#     "MPROXY_*",
+# ]
 
 # Agent env filtering controls which variables are forwarded to the remote.
 # Env vars added or changed by the parent process (after the hook is loaded)

@@ -37,9 +37,13 @@ local_commands = [
     "rg",
 ]
 # A list of remote paths that you want the programs to access
-mounts = ["/path/to/your/workspace"]
+mounts = [
+    "/path/to/your/workspace",
+]
 # filter environment variables that the remote device does not need
-env_remove = ["VSCODE_*"]
+env_remove = [
+    "VSCODE_*",
+]
 ```
 
 Then run it:
@@ -86,9 +90,9 @@ The program is launched with a quasi-remote environment.
 
 ### Compatibility
 
-This program is designed to work with most programs, including editors and CLI-based AI coding agents.
+MachineProxy supports Linux only, for both local and remote devices.
 
-This is a dirty job. Common use cases are covered, but edge cases exist and some may be impossible to fix completely.
+MachineProxy is designed to work with most programs, including editors and CLI-based AI coding agents. Most use cases are covered, but edge cases exist and some may be impossible to fix completely.
 
 ### Security
 
