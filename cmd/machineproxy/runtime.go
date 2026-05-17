@@ -181,6 +181,28 @@ func (d *runtimeDeps) MountWorkspace(ctx context.Context) error {
 	}
 	d.fuseMountDir = tmpDir
 
+	// Roll back any partial mount state on early-return errors so we never
+	// leave a stray FUSE mount or empty temp directory behind. Without this,
+	// failures after the tmpDir is created (e.g., a half-established FUSE
+	// mount) only get cleaned up by Close() at process exit, which may run
+	// long after the kernel mount has become a problem.
+	success := false
+	defer func() {
+		if success {
+			return
+		}
+		if d.fuseServer != nil {
+			if uerr := d.fuseServer.Unmount(); uerr != nil {
+				d.log.Warn("failed to unmount fuse after mount error", "error", uerr)
+			}
+			d.fuseServer = nil
+		}
+		if rerr := os.RemoveAll(tmpDir); rerr != nil {
+			d.log.Warn("failed to remove fuse mount dir after mount error", "error", rerr)
+		}
+		d.fuseMountDir = ""
+	}()
+
 	fsLog := d.log.With("component", "fuse")
 	backend := workspacefs.New(&workspacefs.SFTPAdapter{C: sftpClient}, mount.RemotePath, fsLog)
 	server, err := workspacefs.Mount(ctx, backend, d.fuseMountDir)
@@ -189,6 +211,7 @@ func (d *runtimeDeps) MountWorkspace(ctx context.Context) error {
 	}
 	d.fuseServer = server
 	d.log.Debug("workspace mounted", "mount_dir", tmpDir, "remote_path", mount.RemotePath)
+	success = true
 	return nil
 }
 
