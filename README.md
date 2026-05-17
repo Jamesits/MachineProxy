@@ -40,6 +40,7 @@ local_commands = [
     "rg",
 ]
 # A list of remote paths that you want the programs to access
+# The first entry becames the working directory of the launched process
 mounts = [
     "/path/to/your/workspace",
 ]
