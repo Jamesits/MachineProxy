@@ -203,7 +203,7 @@ func TestMuxRecording(t *testing.T) {
 		_ = muxA.SendEOF(0)
 	}()
 
-	go muxB.ReadLoop(context.Background())
+	go func() { _, _ = muxB.ReadLoop(context.Background()) }()
 
 	code, err := muxA.ReadLoop(context.Background())
 	if err != nil {

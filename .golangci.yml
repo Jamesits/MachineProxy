@@ -1,0 +1,9 @@
+version: "2"
+
+linters:
+  exclusions:
+    rules:
+      # Ignore unchecked errors from deferred Close() calls.
+      - linters:
+          - errcheck
+        source: 'defer .*\.Close\(\)'

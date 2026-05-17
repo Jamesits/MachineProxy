@@ -42,7 +42,7 @@ func testBrokerServer(t *testing.T) *Server {
 	if !mgr.IsConnected() {
 		t.Fatalf("Manager not connected: %v", mgr.LastErr())
 	}
-	t.Cleanup(func() { mgr.Close() })
+	t.Cleanup(func() { _ = mgr.Close() })
 
 	runner := &remoteexec.SSHRunner{Provider: mgr}
 	return NewServer(Deps{Remote: runner})
@@ -57,7 +57,7 @@ func dialBroker(t *testing.T, socketPath string) *net.UnixConn {
 		t.Fatalf("dial broker: %v", err)
 	}
 	uc := conn.(*net.UnixConn)
-	t.Cleanup(func() { uc.Close() })
+	t.Cleanup(func() { _ = uc.Close() })
 	return uc
 }
 
@@ -68,7 +68,11 @@ func TestIntegrationBrokerEcho(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go srv.Start(ctx, socketPath)
+	go func() {
+		if err := srv.Start(ctx, socketPath); err != nil && ctx.Err() == nil {
+			t.Logf("srv.Start: %v", err)
+		}
+	}()
 	waitForSocket(t, socketPath)
 
 	conn := dialBroker(t, socketPath)
@@ -83,7 +87,7 @@ func TestIntegrationBrokerEcho(t *testing.T) {
 	}
 	// Close write side so broker's readStdinFrames gets EOF,
 	// allowing SSHRunner's stdin copy goroutine to finish.
-	conn.CloseWrite()
+	_ = conn.CloseWrite()
 
 	var stdout string
 	for {
@@ -113,7 +117,11 @@ func TestIntegrationBrokerStdinForward(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go srv.Start(ctx, socketPath)
+	go func() {
+		if err := srv.Start(ctx, socketPath); err != nil && ctx.Err() == nil {
+			t.Logf("srv.Start: %v", err)
+		}
+	}()
 	waitForSocket(t, socketPath)
 
 	conn := dialBroker(t, socketPath)
@@ -131,7 +139,7 @@ func TestIntegrationBrokerStdinForward(t *testing.T) {
 	if err := enc.Encode(Frame{Stream: StreamStdin, Data: []byte("from broker")}); err != nil {
 		t.Fatalf("send stdin: %v", err)
 	}
-	conn.CloseWrite()
+	_ = conn.CloseWrite()
 
 	var stdout string
 	for {
@@ -161,7 +169,11 @@ func TestIntegrationBrokerNonZeroExit(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go srv.Start(ctx, socketPath)
+	go func() {
+		if err := srv.Start(ctx, socketPath); err != nil && ctx.Err() == nil {
+			t.Logf("srv.Start: %v", err)
+		}
+	}()
 	waitForSocket(t, socketPath)
 
 	conn := dialBroker(t, socketPath)
@@ -174,7 +186,7 @@ func TestIntegrationBrokerNonZeroExit(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("encode: %v", err)
 	}
-	conn.CloseWrite()
+	_ = conn.CloseWrite()
 
 	for {
 		var frame Frame
@@ -197,7 +209,11 @@ func TestIntegrationBrokerMultipleClients(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go srv.Start(ctx, socketPath)
+	go func() {
+		if err := srv.Start(ctx, socketPath); err != nil && ctx.Err() == nil {
+			t.Logf("srv.Start: %v", err)
+		}
+	}()
 	waitForSocket(t, socketPath)
 
 	type result struct {
@@ -220,11 +236,14 @@ func TestIntegrationBrokerMultipleClients(t *testing.T) {
 			enc := json.NewEncoder(uc)
 			dec := json.NewDecoder(uc)
 
-			enc.Encode(ExecRequest{
+			if err := enc.Encode(ExecRequest{
 				Path: "/bin/echo",
 				Argv: []string{"echo", string(rune('A' + idx))},
-			})
-			uc.CloseWrite()
+			}); err != nil {
+				results <- result{err: err}
+				return
+			}
+			_ = uc.CloseWrite()
 
 			var stdout string
 			for {

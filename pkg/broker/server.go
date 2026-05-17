@@ -156,7 +156,7 @@ func (s *Server) serveConn(ctx context.Context, conn net.Conn) {
 		_ = stdoutWriter.Close()
 		_ = stderrWriter.Close()
 		for _, rwc := range extraFDPipes {
-			rwc.Close()
+			_ = rwc.Close()
 		}
 		streamWG.Wait()
 
@@ -292,12 +292,12 @@ type fdPipePair struct {
 func (p *fdPipePair) Close() error {
 	p.closeOnce.Do(func() {
 		if r, ok := p.Reader.(*io.PipeReader); ok {
-			r.Close()
+			_ = r.Close()
 		}
 		if w, ok := p.Writer.(*io.PipeWriter); ok {
-			w.Close()
+			_ = w.Close()
 		}
-		p.remoteW.Close()
+		_ = p.remoteW.Close()
 	})
 	return nil
 }

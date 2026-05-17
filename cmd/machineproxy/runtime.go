@@ -190,8 +190,13 @@ func (d *runtimeDeps) StartBroker(ctx context.Context) error {
 		return fmt.Errorf("create temp broker socket: %w", err)
 	}
 	socketPath := f.Name()
-	f.Close()
-	os.Remove(socketPath) // broker.Start will create the Unix socket here
+	if err := f.Close(); err != nil {
+		d.log.Warn("close temp broker socket file", "path", socketPath, "error", err)
+	}
+	// broker.Start will create the Unix socket at this path; remove the placeholder first.
+	if err := os.Remove(socketPath); err != nil {
+		d.log.Warn("remove temp broker socket placeholder", "path", socketPath, "error", err)
+	}
 	d.brokerSocket = socketPath
 
 	d.log.Log(ctx, logging.LevelTrace, "starting broker", "socket", socketPath)

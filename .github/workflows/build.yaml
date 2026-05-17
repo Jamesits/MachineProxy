@@ -15,16 +15,32 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@a5ad31d6a139d249332a2605b85202e8c0b78450 # v2.19.1
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+            goreleaser.com:443
+            raw.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            proxy.golang.org:443
+
       - uses: actions/checkout@v6
+
       - uses: actions/setup-go@v6
         with:
           go-version-file: 'go.mod'
-          cache: true
+          cache: false
+
       - run: go mod download
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v7
         with:
           args: build --clean --snapshot
+
       - name: Run linters
         uses: golangci/golangci-lint-action@v9
         with:

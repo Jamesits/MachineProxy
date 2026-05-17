@@ -118,7 +118,10 @@ func (f *FileSystem) CreateFile(ctx context.Context, rel string) syscall.Errno {
 	if err != nil {
 		return toErrno(err)
 	}
-	fh.Close()
+	if cerr := fh.Close(); cerr != nil {
+		f.log.Warn("close newly created remote file", "path", abs, "error", cerr)
+		return toErrno(cerr)
+	}
 	return 0
 }
 

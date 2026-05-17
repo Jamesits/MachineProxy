@@ -43,7 +43,7 @@ func testSSHRunner(t *testing.T) (*SSHRunner, func()) {
 	}
 
 	runner := &SSHRunner{Provider: mgr}
-	return runner, func() { mgr.Close() }
+	return runner, func() { _ = mgr.Close() }
 }
 
 func TestIntegrationRunEchoCommand(t *testing.T) {

@@ -141,7 +141,9 @@ func TestRunReturnsWithOpenStdin(t *testing.T) {
 }
 
 func TestRunFailsWithoutBrokerSocket(t *testing.T) {
-	os.Unsetenv("MPROXY_BROKER_SOCK")
+	if err := os.Unsetenv("MPROXY_BROKER_SOCK"); err != nil {
+		t.Fatalf("unsetenv: %v", err)
+	}
 	code := Run([]string{"mproxy-shim", "/usr/bin/env", "env"}, bytes.NewBuffer(nil), &bytes.Buffer{}, &bytes.Buffer{})
 	if code != 127 {
 		t.Fatalf("exit code = %d, want 127", code)

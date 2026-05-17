@@ -1,6 +1,7 @@
 package agenttransfer
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"io"
@@ -50,11 +51,11 @@ func (t *Transferer) Ensure() (string, error) {
 	defer t.mu.Unlock()
 
 	if t.transferred {
-		t.log.Log(nil, logging.LevelTrace, "agent binary already transferred")
+		t.log.Log(context.TODO(), logging.LevelTrace, "agent binary already transferred")
 		return t.remotePath, nil
 	}
 
-	t.log.Log(nil, logging.LevelTrace, "computing local agent hash", "path", t.localPath)
+	t.log.Log(context.TODO(), logging.LevelTrace, "computing local agent hash", "path", t.localPath)
 	hash, err := t.computeLocalHash()
 	if err != nil {
 		return "", fmt.Errorf("hash local agent binary: %w", err)
@@ -126,7 +127,7 @@ func uploadFile(client *sftp.Client, localPath, remotePath string, mode os.FileM
 	}
 
 	if _, err := io.Copy(dst, src); err != nil {
-		dst.Close()
+		_ = dst.Close()
 		return err
 	}
 	if err := dst.Close(); err != nil {
@@ -142,7 +143,7 @@ func writeRemoteFile(client *sftp.Client, path string, data []byte, mode os.File
 		return err
 	}
 	if _, err := f.Write(data); err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
 	if err := f.Close(); err != nil {

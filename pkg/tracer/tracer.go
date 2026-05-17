@@ -1,6 +1,7 @@
 package tracer
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -159,7 +160,7 @@ func (t *Tracer) traceLoop(childPid int) int {
 			event == unix.PTRACE_EVENT_CLONE:
 			if newPid, err := unix.PtraceGetEventMsg(pid); err == nil {
 				np := int(newPid)
-				t.log.Log(nil, logging.LevelTrace, "new child process", "parent_pid", pid, "child_pid", np, "event", event)
+				t.log.Log(context.TODO(), logging.LevelTrace, "new child process", "parent_pid", pid, "child_pid", np, "event", event)
 				if _, exists := t.pids[np]; !exists {
 					t.pids[np] = &pidState{expectStop: true}
 				}
@@ -239,12 +240,12 @@ func (t *Tracer) handleSyscallStop(pid int) {
 	pathname, err := ReadString(pid, regs.PathAddr(isExecveat))
 	if err != nil || t.shouldAllow(pathname) {
 		if err == nil {
-			t.log.Log(nil, logging.LevelTrace, "exec allowed (whitelisted)", "pid", pid, "path", pathname)
+			t.log.Log(context.TODO(), logging.LevelTrace, "exec allowed (whitelisted)", "pid", pid, "path", pathname)
 		}
 		return
 	}
 
-	t.log.Log(nil, logging.LevelTrace, "exec intercepted, rewriting to shim", "pid", pid, "path", pathname)
+	t.log.Log(context.TODO(), logging.LevelTrace, "exec intercepted, rewriting to shim", "pid", pid, "path", pathname)
 
 	argv, err := ReadStringArray(pid, regs.ArgvAddr(isExecveat))
 	if err != nil {

@@ -73,8 +73,8 @@ func buildCmd(msg *agentproto.ExecMsg) (*exec.Cmd, *childPipes, error) {
 	// stdout: pipe, child writes to w, agent reads from r.
 	stdoutR, stdoutW, err := os.Pipe()
 	if err != nil {
-		stdinR.Close()
-		stdinW.Close()
+		_ = stdinR.Close()
+		_ = stdinW.Close()
 		return nil, nil, fmt.Errorf("stdout pipe: %w", err)
 	}
 	cmd.Stdout = stdoutW
@@ -83,10 +83,10 @@ func buildCmd(msg *agentproto.ExecMsg) (*exec.Cmd, *childPipes, error) {
 	// stderr: pipe, child writes to w, agent reads from r.
 	stderrR, stderrW, err := os.Pipe()
 	if err != nil {
-		stdinR.Close()
-		stdinW.Close()
-		stdoutR.Close()
-		stdoutW.Close()
+		_ = stdinR.Close()
+		_ = stdinW.Close()
+		_ = stdoutR.Close()
+		_ = stdoutW.Close()
 		return nil, nil, fmt.Errorf("stderr pipe: %w", err)
 	}
 	cmd.Stderr = stderrW
@@ -119,33 +119,33 @@ func buildCmd(msg *agentproto.ExecMsg) (*exec.Cmd, *childPipes, error) {
 // These must be closed in the agent so the child is the only holder.
 func closeChildFDs(cmd *exec.Cmd) {
 	if f, ok := cmd.Stdin.(*os.File); ok && f != nil {
-		f.Close()
+		_ = f.Close()
 	}
 	if f, ok := cmd.Stdout.(*os.File); ok && f != nil {
-		f.Close()
+		_ = f.Close()
 	}
 	if f, ok := cmd.Stderr.(*os.File); ok && f != nil {
-		f.Close()
+		_ = f.Close()
 	}
 	for _, f := range cmd.ExtraFiles {
 		if f != nil {
-			f.Close()
+			_ = f.Close()
 		}
 	}
 }
 
 func closePipes(p *childPipes) {
 	if p.stdin != nil {
-		p.stdin.Close()
+		_ = p.stdin.Close()
 	}
 	if p.stdout != nil {
-		p.stdout.Close()
+		_ = p.stdout.Close()
 	}
 	if p.stderr != nil {
-		p.stderr.Close()
+		_ = p.stderr.Close()
 	}
 	for _, f := range p.extra {
-		f.Close()
+		_ = f.Close()
 	}
 }
 
@@ -159,8 +159,8 @@ func socketpair() (agent *os.File, child *os.File, err error) {
 
 	// Clear CLOEXEC on the child end so it survives exec.
 	if err := clearCloexec(fds[1]); err != nil {
-		agent.Close()
-		child.Close()
+		_ = agent.Close()
+		_ = child.Close()
 		return nil, nil, err
 	}
 	return agent, child, nil

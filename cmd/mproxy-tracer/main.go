@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -34,7 +35,7 @@ func main() {
 		go func() {
 			for sig := range sigCh {
 				if s, ok := sig.(syscall.Signal); ok {
-					log.Log(nil, logging.LevelTrace, "forwarding signal to child", "signal", s, "pid", childPid)
+					log.Log(context.TODO(), logging.LevelTrace, "forwarding signal to child", "signal", s, "pid", childPid)
 					_ = syscall.Kill(childPid, s)
 				}
 			}

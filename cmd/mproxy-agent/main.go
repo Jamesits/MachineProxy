@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"io"
 	"log/slog"
 	"os"
 	"sync"
@@ -133,7 +135,7 @@ func run() int {
 					if sendErr := mux.SendEOF(stream); sendErr != nil {
 						log.Warn("mux send eof failed", "stream", stream, "error", sendErr)
 					}
-					r.Close()
+					_ = r.Close()
 					return
 				}
 			}
@@ -151,7 +153,9 @@ func run() int {
 	muxDone := make(chan struct{})
 	go func() {
 		defer close(muxDone)
-		mux.ReadLoop(ctx)
+		if _, err := mux.ReadLoop(ctx); err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
+			log.Warn("mux read loop ended with error", "error", err)
+		}
 	}()
 
 	// Wait for child to exit.

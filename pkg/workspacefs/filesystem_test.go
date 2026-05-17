@@ -8,7 +8,6 @@ import (
 	"path"
 	"syscall"
 	"testing"
-	"time"
 )
 
 func TestReadFileDelegatesToSFTP(t *testing.T) {
@@ -204,18 +203,3 @@ func (f *fakeRemoteWriteFile) WriteAt(p []byte, off int64) (int, error) {
 }
 
 func (f *fakeRemoteWriteFile) Close() error { return nil }
-
-type fakeFileInfo struct {
-	name  string
-	size  int64
-	mode  os.FileMode
-	mod   time.Time
-	isDir bool
-}
-
-func (f fakeFileInfo) Name() string       { return f.name }
-func (f fakeFileInfo) Size() int64        { return f.size }
-func (f fakeFileInfo) Mode() os.FileMode  { return f.mode }
-func (f fakeFileInfo) ModTime() time.Time { return f.mod }
-func (f fakeFileInfo) IsDir() bool        { return f.isDir }
-func (f fakeFileInfo) Sys() any           { return nil }

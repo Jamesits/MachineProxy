@@ -90,7 +90,7 @@ func TestMuxEOFClosesHandler(t *testing.T) {
 		_ = enc.Encode(&Frame{Type: FrameExit, Code: 0})
 	}()
 
-	mux.ReadLoop(context.Background())
+	_, _ = mux.ReadLoop(context.Background())
 	if !eofCalled {
 		t.Error("EOF handler not called")
 	}
@@ -137,7 +137,7 @@ func TestMuxBidirectional(t *testing.T) {
 	}()
 
 	// B runs its read loop in a goroutine.
-	go muxB.ReadLoop(context.Background())
+	go func() { _, _ = muxB.ReadLoop(context.Background()) }()
 
 	code, err := muxA.ReadLoop(context.Background())
 	if err != nil {

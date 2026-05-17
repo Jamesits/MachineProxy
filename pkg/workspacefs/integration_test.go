@@ -43,13 +43,13 @@ func testFS(t *testing.T) *FileSystem {
 	if err != nil {
 		t.Fatalf("ssh dial: %v", err)
 	}
-	t.Cleanup(func() { sshClient.Close() })
+	t.Cleanup(func() { _ = sshClient.Close() })
 
 	sftpClient, err := sftp.NewClient(sshClient)
 	if err != nil {
 		t.Fatalf("sftp client: %v", err)
 	}
-	t.Cleanup(func() { sftpClient.Close() })
+	t.Cleanup(func() { _ = sftpClient.Close() })
 
 	testDir := fmt.Sprintf("/tmp/mproxy_test_%d", rand.Int64())
 	if err := sftpClient.Mkdir(testDir); err != nil {
@@ -69,10 +69,10 @@ func cleanupDir(c *sftp.Client, dir string) {
 		if e.IsDir() {
 			cleanupDir(c, p)
 		} else {
-			c.Remove(p)
+			_ = c.Remove(p)
 		}
 	}
-	c.Remove(dir)
+	_ = c.Remove(dir)
 }
 
 func TestIntegrationCreateAndReadFile(t *testing.T) {
@@ -105,8 +105,12 @@ func TestIntegrationReadFileAtOffset(t *testing.T) {
 	fs := testFS(t)
 	ctx := context.Background()
 
-	fs.CreateFile(ctx, "offset.txt")
-	fs.WriteFile(ctx, "offset.txt", []byte("abcdefghij"), 0)
+	if errno := fs.CreateFile(ctx, "offset.txt"); errno != 0 {
+		t.Fatalf("CreateFile: errno %v", errno)
+	}
+	if _, errno := fs.WriteFile(ctx, "offset.txt", []byte("abcdefghij"), 0); errno != 0 {
+		t.Fatalf("WriteFile: errno %v", errno)
+	}
 
 	data, errno := fs.ReadFile(ctx, "offset.txt", 5, 5)
 	if errno != 0 {
@@ -121,8 +125,12 @@ func TestIntegrationStat(t *testing.T) {
 	fs := testFS(t)
 	ctx := context.Background()
 
-	fs.CreateFile(ctx, "statme.txt")
-	fs.WriteFile(ctx, "statme.txt", []byte("12345"), 0)
+	if errno := fs.CreateFile(ctx, "statme.txt"); errno != 0 {
+		t.Fatalf("CreateFile: errno %v", errno)
+	}
+	if _, errno := fs.WriteFile(ctx, "statme.txt", []byte("12345"), 0); errno != 0 {
+		t.Fatalf("WriteFile: errno %v", errno)
+	}
 
 	info, errno := fs.Stat("statme.txt")
 	if errno != 0 {
@@ -165,7 +173,9 @@ func TestIntegrationMkDirAndReadDir(t *testing.T) {
 		t.Fatal("expected directory")
 	}
 
-	fs.CreateFile(ctx, "subdir/inner.txt")
+	if errno := fs.CreateFile(ctx, "subdir/inner.txt"); errno != 0 {
+		t.Fatalf("CreateFile: errno %v", errno)
+	}
 
 	entries, errno := fs.ReadDir("")
 	if errno != 0 {
@@ -188,8 +198,12 @@ func TestIntegrationRename(t *testing.T) {
 	fs := testFS(t)
 	ctx := context.Background()
 
-	fs.CreateFile(ctx, "old.txt")
-	fs.WriteFile(ctx, "old.txt", []byte("content"), 0)
+	if errno := fs.CreateFile(ctx, "old.txt"); errno != 0 {
+		t.Fatalf("CreateFile: errno %v", errno)
+	}
+	if _, errno := fs.WriteFile(ctx, "old.txt", []byte("content"), 0); errno != 0 {
+		t.Fatalf("WriteFile: errno %v", errno)
+	}
 
 	errno := fs.Rename(ctx, "old.txt", "new.txt")
 	if errno != 0 {
@@ -214,7 +228,9 @@ func TestIntegrationUnlink(t *testing.T) {
 	fs := testFS(t)
 	ctx := context.Background()
 
-	fs.CreateFile(ctx, "delete_me.txt")
+	if errno := fs.CreateFile(ctx, "delete_me.txt"); errno != 0 {
+		t.Fatalf("CreateFile: errno %v", errno)
+	}
 
 	errno := fs.Unlink(ctx, "delete_me.txt")
 	if errno != 0 {
@@ -231,7 +247,9 @@ func TestIntegrationRmdir(t *testing.T) {
 	fs := testFS(t)
 	ctx := context.Background()
 
-	fs.MkDir(ctx, "empty_dir")
+	if errno := fs.MkDir(ctx, "empty_dir"); errno != 0 {
+		t.Fatalf("MkDir: errno %v", errno)
+	}
 
 	errno := fs.Rmdir(ctx, "empty_dir")
 	if errno != 0 {
@@ -248,7 +266,9 @@ func TestIntegrationChmod(t *testing.T) {
 	fs := testFS(t)
 	ctx := context.Background()
 
-	fs.CreateFile(ctx, "chmod_me.txt")
+	if errno := fs.CreateFile(ctx, "chmod_me.txt"); errno != 0 {
+		t.Fatalf("CreateFile: errno %v", errno)
+	}
 
 	errno := fs.Chmod(ctx, "chmod_me.txt", 0o755)
 	if errno != 0 {
@@ -268,8 +288,12 @@ func TestIntegrationTruncate(t *testing.T) {
 	fs := testFS(t)
 	ctx := context.Background()
 
-	fs.CreateFile(ctx, "trunc.txt")
-	fs.WriteFile(ctx, "trunc.txt", []byte("long content here"), 0)
+	if errno := fs.CreateFile(ctx, "trunc.txt"); errno != 0 {
+		t.Fatalf("CreateFile: errno %v", errno)
+	}
+	if _, errno := fs.WriteFile(ctx, "trunc.txt", []byte("long content here"), 0); errno != 0 {
+		t.Fatalf("WriteFile: errno %v", errno)
+	}
 
 	errno := fs.Truncate(ctx, "trunc.txt", 4)
 	if errno != 0 {
