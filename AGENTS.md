@@ -1,19 +1,19 @@
 # MachineProxy
-No need to read `README.md`, it is for humans.
+You do not need to read `README.md`; it is for humans.
 
 ## Tech Stack
-- Use Golang for everything, build with Goreleaser
-- All serialization should use CBOR
-- Container use Bubblewrap (use `man bwrap` to read usage)
+- Use Go for everything, and build with Goreleaser.
+- All machine-to-machine protocols should use CBOR serialization.
+- Containers use Bubblewrap. Use `man bwrap` to read its usage.
 
 ## Code Style
-- Document the higher intention with comments
+- Use comments to document higher-level intent.
 
 ## Compilation
-Always full recompile with `goreleaser build --snapshot --clean` and use the artifacts under `dist/`.
+Always perform a full rebuild with `goreleaser build --snapshot --clean`, and use the artifacts under `dist/`.
 
 ## Glossary
 ### Environments
-- Local: The operator's OS. `machineproxy` and `mproxy-tracer` runs here.
-- Container: A new mount namespace where the target process and `mproxy-shim` runs. It is on the same machine as Local. It has the remote workspace mounted as FUSE.
-- Remote: The machine where new programs invoked by the target process runs. Not the same machine of Local and Container. `mproxy-agent` runs here.
+- Local: The operator's OS. `machineproxy` runs here.
+- Container: A Bubblewrap-created mount namespace on the Local machine. The target process, `mproxy-tracer`, and `mproxy-shim` run here. The remote workspace is mounted locally via FUSE/SFTP and bind-mounted into this namespace.
+- Remote: The SSH-accessible machine where non-whitelisted execs from the target process run. `mproxy-agent` runs here.
