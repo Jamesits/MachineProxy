@@ -99,7 +99,7 @@ The program is launched with a quasi-remote environment.
 
 MachineProxy supports Linux only, for both local and remote devices. Golang runtime requires Linux 3.2 or later; [support differs on different architectures](https://go.dev/wiki/MinimumRequirements#linuxlinux).
 
-MachineProxy remote agent (`mproxy-agent`) must be compiled in the remote device's architecture. The official packages contains `amd64` (v1) and `arm64` (v8) builds.
+MachineProxy remote agent (`mproxy-agent`) must be compiled in the remote device's architecture. The official packages contains `amd64` (v1) and `arm64` (v8) builds. If you need agents for other architectures or variants, you must compile them yourself. I can't test them due to the availability of hardware, so bugs might exist; bug reports and contributions are welcomed.
 
 MachineProxy is designed to work with most programs, including editors and CLI-based AI coding agents. Most use cases are covered, but edge cases exist and some may be impossible to fix completely.
 

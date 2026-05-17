@@ -14,7 +14,8 @@ func ReadString(pid int, addr uintptr) (string, error) {
 	}
 
 	var buf [4096]byte
-	local := unix.Iovec{Base: &buf[0], Len: uint64(len(buf))}
+	local := unix.Iovec{Base: &buf[0]}
+	local.SetLen(len(buf))
 	remote := unix.RemoteIovec{Base: addr, Len: len(buf)}
 
 	n, err := unix.ProcessVMReadv(pid, []unix.Iovec{local}, []unix.RemoteIovec{remote}, 0)
@@ -33,8 +34,8 @@ func ReadPointer(pid int, addr uintptr) (uintptr, error) {
 	var val uintptr
 	local := unix.Iovec{
 		Base: (*byte)(unsafe.Pointer(&val)),
-		Len:  uint64(unsafe.Sizeof(val)),
 	}
+	local.SetLen(int(unsafe.Sizeof(val)))
 	remote := unix.RemoteIovec{Base: addr, Len: int(unsafe.Sizeof(val))}
 
 	_, err := unix.ProcessVMReadv(pid, []unix.Iovec{local}, []unix.RemoteIovec{remote}, 0)
@@ -74,7 +75,8 @@ func WriteBytes(pid int, addr uintptr, data []byte) error {
 	if len(data) == 0 {
 		return nil
 	}
-	local := unix.Iovec{Base: &data[0], Len: uint64(len(data))}
+	local := unix.Iovec{Base: &data[0]}
+	local.SetLen(len(data))
 	remote := unix.RemoteIovec{Base: addr, Len: len(data)}
 	_, err := unix.ProcessVMWritev(pid, []unix.Iovec{local}, []unix.RemoteIovec{remote}, 0)
 	return err

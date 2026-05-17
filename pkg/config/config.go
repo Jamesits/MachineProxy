@@ -62,14 +62,14 @@ type Config struct {
 
 	Container struct {
 		LocalCommands []string `yaml:"local_commands" toml:"local_commands" json:"local_commands"`
-		Mounts        []string `yaml:"mounts" toml:"mounts" json:"mounts"`                   // docker-compose style: [local:]remote
-		WorkingDir    string   `yaml:"working_dir" toml:"working_dir" json:"working_dir"`    // override container working directory; defaults to first mount's local path
-		EnvRemove     []string `yaml:"env_remove" toml:"env_remove" json:"env_remove"`       // glob/regex patterns for env vars to strip from the container process
+		Mounts        []string `yaml:"mounts" toml:"mounts" json:"mounts"`                // docker-compose style: [local:]remote
+		WorkingDir    string   `yaml:"working_dir" toml:"working_dir" json:"working_dir"` // override container working directory; defaults to first mount's local path
+		EnvRemove     []string `yaml:"env_remove" toml:"env_remove" json:"env_remove"`    // glob/regex patterns for env vars to strip from the container process
 	} `yaml:"container" toml:"container" json:"container"`
 
 	Agent struct {
-		EnvKeep   []string `yaml:"env_keep" toml:"env_keep" json:"env_keep"`         // glob/regex patterns for inherited env vars to forward to remote
-		EnvRemove []string `yaml:"env_remove" toml:"env_remove" json:"env_remove"`   // glob/regex patterns for env vars to always strip from remote
+		EnvKeep   []string `yaml:"env_keep" toml:"env_keep" json:"env_keep"`       // glob/regex patterns for inherited env vars to forward to remote
+		EnvRemove []string `yaml:"env_remove" toml:"env_remove" json:"env_remove"` // glob/regex patterns for env vars to always strip from remote
 	} `yaml:"agent" toml:"agent" json:"agent"`
 
 	Components struct {
