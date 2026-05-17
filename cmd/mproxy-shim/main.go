@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -64,17 +63,14 @@ func Run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 		req.Cwd = cwd
 	}
 
-	enc := json.NewEncoder(conn)
-	dec := json.NewDecoder(conn)
+	enc := broker.NewEncoder(conn)
+	dec := broker.NewDecoder(conn)
 
 	if err := enc.Encode(req); err != nil {
 		return 127
 	}
 
-	var encMu sync.Mutex
 	safeSend := func(frame broker.Frame) {
-		encMu.Lock()
-		defer encMu.Unlock()
 		_ = enc.Encode(frame)
 	}
 

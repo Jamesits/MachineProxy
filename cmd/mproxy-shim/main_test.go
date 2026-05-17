@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"net"
 	"os"
 	"path/filepath"
@@ -28,8 +27,8 @@ func TestRunBridgesStreamsAndExitCode(t *testing.T) {
 		}
 		defer conn.Close()
 
-		dec := json.NewDecoder(conn)
-		enc := json.NewEncoder(conn)
+		dec := broker.NewDecoder(conn)
+		enc := broker.NewEncoder(conn)
 
 		var req broker.ExecRequest
 		_ = dec.Decode(&req)
@@ -76,8 +75,8 @@ func TestRunNoOriginalArgvSendsNilArgv(t *testing.T) {
 		}
 		defer conn.Close()
 
-		dec := json.NewDecoder(conn)
-		enc := json.NewEncoder(conn)
+		dec := broker.NewDecoder(conn)
+		enc := broker.NewEncoder(conn)
 		_ = dec.Decode(&gotReq)
 		_ = enc.Encode(broker.Frame{Stream: broker.StreamExit, Code: 0})
 	}()
@@ -115,8 +114,8 @@ func TestRunReturnsWithOpenStdin(t *testing.T) {
 		}
 		defer conn.Close()
 
-		dec := json.NewDecoder(conn)
-		enc := json.NewEncoder(conn)
+		dec := broker.NewDecoder(conn)
+		enc := broker.NewEncoder(conn)
 		var req broker.ExecRequest
 		_ = dec.Decode(&req)
 		_ = enc.Encode(broker.Frame{Stream: broker.StreamStdout, Data: []byte("ok")})

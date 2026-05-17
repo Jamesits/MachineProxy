@@ -2,7 +2,6 @@ package broker
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -86,8 +85,8 @@ func listenUnixPrivate(socketPath string) (net.Listener, error) {
 func (s *Server) serveConn(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
 
-	enc := json.NewEncoder(conn)
-	dec := json.NewDecoder(conn)
+	enc := NewEncoder(conn)
+	dec := NewDecoder(conn)
 
 	var req ExecRequest
 	if err := dec.Decode(&req); err != nil {
@@ -111,10 +110,7 @@ func (s *Server) serveConn(ctx context.Context, conn net.Conn) {
 	stdinReader, stdinWriter := io.Pipe()
 	defer stdinReader.Close()
 
-	var encMu sync.Mutex
 	send := func(frame Frame) {
-		encMu.Lock()
-		defer encMu.Unlock()
 		_ = enc.Encode(frame)
 	}
 
@@ -219,7 +215,7 @@ func (s *Server) runRemote(ctx context.Context, req ExecRequest, stdin io.Reader
 }
 
 // readFramesBasic is the legacy frame reader that only handles stdin.
-func (s *Server) readFramesBasic(dec *json.Decoder, w *io.PipeWriter) {
+func (s *Server) readFramesBasic(dec *Decoder, w *io.PipeWriter) {
 	defer w.Close()
 	for {
 		var frame Frame
@@ -239,7 +235,7 @@ func (s *Server) readFramesBasic(dec *json.Decoder, w *io.PipeWriter) {
 }
 
 // readFrames dispatches incoming shim frames to stdin, signals, and extra fd pipes.
-func (s *Server) readFrames(dec *json.Decoder, stdinW *io.PipeWriter, sigCh chan<- int, extraFDs map[uint32]io.ReadWriteCloser) {
+func (s *Server) readFrames(dec *Decoder, stdinW *io.PipeWriter, sigCh chan<- int, extraFDs map[uint32]io.ReadWriteCloser) {
 	defer stdinW.Close()
 	defer close(sigCh)
 

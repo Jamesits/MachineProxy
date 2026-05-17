@@ -6,11 +6,11 @@ import (
 )
 
 type Request struct {
-	Path     string   `json:"path"`
-	Argv     []string `json:"argv"`
-	Env      []string `json:"env"`
-	Cwd      string   `json:"cwd"`
-	ExtraFDs []uint32 `json:"extra_fds,omitempty"`
+	Path     string   `cbor:"path"`
+	Argv     []string `cbor:"argv"`
+	Env      []string `cbor:"env"`
+	Cwd      string   `cbor:"cwd"`
+	ExtraFDs []uint32 `cbor:"extra_fds,omitempty"`
 }
 
 // Runner executes a request and writes command output to stdout/stderr.

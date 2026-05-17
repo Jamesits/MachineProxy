@@ -2,7 +2,6 @@ package broker
 
 import (
 	"context"
-	"encoding/json"
 	"net"
 	"os"
 	"path/filepath"
@@ -76,8 +75,8 @@ func TestIntegrationBrokerEcho(t *testing.T) {
 	waitForSocket(t, socketPath)
 
 	conn := dialBroker(t, socketPath)
-	enc := json.NewEncoder(conn)
-	dec := json.NewDecoder(conn)
+	enc := NewEncoder(conn)
+	dec := NewDecoder(conn)
 
 	if err := enc.Encode(ExecRequest{
 		Path: "/bin/echo",
@@ -125,8 +124,8 @@ func TestIntegrationBrokerStdinForward(t *testing.T) {
 	waitForSocket(t, socketPath)
 
 	conn := dialBroker(t, socketPath)
-	enc := json.NewEncoder(conn)
-	dec := json.NewDecoder(conn)
+	enc := NewEncoder(conn)
+	dec := NewDecoder(conn)
 
 	if err := enc.Encode(ExecRequest{
 		Path: "/bin/sh",
@@ -177,8 +176,8 @@ func TestIntegrationBrokerNonZeroExit(t *testing.T) {
 	waitForSocket(t, socketPath)
 
 	conn := dialBroker(t, socketPath)
-	enc := json.NewEncoder(conn)
-	dec := json.NewDecoder(conn)
+	enc := NewEncoder(conn)
+	dec := NewDecoder(conn)
 
 	if err := enc.Encode(ExecRequest{
 		Path: "/bin/sh",
@@ -233,8 +232,8 @@ func TestIntegrationBrokerMultipleClients(t *testing.T) {
 			defer conn.Close()
 
 			uc := conn.(*net.UnixConn)
-			enc := json.NewEncoder(uc)
-			dec := json.NewDecoder(uc)
+			enc := NewEncoder(uc)
+			dec := NewDecoder(uc)
 
 			if err := enc.Encode(ExecRequest{
 				Path: "/bin/echo",

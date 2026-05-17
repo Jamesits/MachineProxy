@@ -2,7 +2,6 @@ package broker
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -70,8 +69,8 @@ func TestBrokerForwardsStdioAndExitCode(t *testing.T) {
 
 	go srv.serveConn(ctx, serverConn)
 
-	enc := json.NewEncoder(clientConn)
-	dec := json.NewDecoder(clientConn)
+	enc := NewEncoder(clientConn)
+	dec := NewDecoder(clientConn)
 
 	req := ExecRequest{Path: "/usr/bin/python3", Argv: []string{"python3", "-V"}}
 	if err := enc.Encode(req); err != nil {
@@ -121,8 +120,8 @@ func TestBrokerReturns127WhenRemoteCannotStart(t *testing.T) {
 
 	go srv.serveConn(ctx, serverConn)
 
-	enc := json.NewEncoder(clientConn)
-	dec := json.NewDecoder(clientConn)
+	enc := NewEncoder(clientConn)
+	dec := NewDecoder(clientConn)
 	if err := enc.Encode(ExecRequest{Path: "/usr/bin/missing", Argv: []string{"missing"}}); err != nil {
 		t.Fatalf("encode request: %v", err)
 	}
