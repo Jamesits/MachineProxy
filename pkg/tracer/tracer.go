@@ -242,6 +242,12 @@ func (t *Tracer) handleSyscallStop(pid int) {
 		t.blockExec(pid, regs, "read exec path", err)
 		return
 	}
+	if isExecveat && pathname == "" {
+		// FD-based execveat/fexecve cannot be represented as a remote path yet.
+		// Let it proceed locally, but warn because this escapes remote execution.
+		t.log.Warn("leaked execveat call", "pid", pid, "reason", "empty path")
+		return
+	}
 	if t.shouldAllow(pathname) {
 		t.log.Log(context.TODO(), logging.LevelTrace, "exec allowed (whitelisted)", "pid", pid, "path", pathname)
 		return
