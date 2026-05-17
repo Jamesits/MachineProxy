@@ -25,19 +25,20 @@ remote:
 container:
   local_commands:
     # A list of programs that you want to run locally
-    - claude
-    - vim
-    - rtk
-    - findmnt
     - amp
-    - qpdf
+    - codex
+    - claude
+    - findmnt
     - node
+    - opencode
+    - qpdf
+    - rtk
     - rg
-    - pacman
   mounts:
-    # A list of remote paths that you want the programs to access.
+    # A list of remote paths that you want the programs to access
     - /path/to/your/workspace
   env_remove:
+    # filter environment variables that the remote device does not need
     - VSCODE_*
 ```
 
