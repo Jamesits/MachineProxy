@@ -4,6 +4,8 @@ MachineProxy solves the last-hop problem for your AI agent, even when the target
 
 ![Project Status - Premature](https://img.shields.io/badge/Project_Status-Premature-yellow)
 ![100% AI Code](https://img.shields.io/badge/AI_Code-100%25-blue)
+![Reviewed by A Human](https://img.shields.io/badge/reviewed_by-a_human-green)
+[![Go Reference](https://pkg.go.dev/badge/github.com/jamesits/machineproxy.svg)](https://pkg.go.dev/github.com/jamesits/machineproxy)
 
 MachineProxy creates a mixed-reality environment for your agent, or for any other program. The program itself runs locally, while seeing and acting on another machine over SSH.
 
@@ -44,6 +46,9 @@ mounts = [
 ]
 # filter environment variables that the remote device does not need
 env_remove = [
+    "AMP_*",
+    "ANTHROPIC_*",
+    "MPROXY_*",
     "VSCODE_*",
 ]
 ```
@@ -103,6 +108,10 @@ MachineProxy is designed to work with most programs, including editors and CLI-b
 DO NOT treat MachineProxy as a security barrier. Programs launched by MachineProxy can run commands on both the local and remote devices. Only run programs you trust, and only ask the AI to do things you trust it to do.
 
 ## Known Issues
+
+### Mounts
+
+- DO NOT mount over your local home directory, otherwise your AI agents might not be able to read its config.
 
 ### Shells
 
