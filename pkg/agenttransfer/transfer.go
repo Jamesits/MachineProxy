@@ -16,10 +16,33 @@ import (
 // SFTPProvider returns the current SFTP client.
 type SFTPProvider func() *sftp.Client
 
+type remoteFileClient interface {
+	Open(path string) (io.ReadCloser, error)
+	OpenFile(path string, flags int) (io.WriteCloser, error)
+	Chmod(path string, mode os.FileMode) error
+}
+
+type sftpRemoteClient struct {
+	client *sftp.Client
+}
+
+func (c sftpRemoteClient) Open(path string) (io.ReadCloser, error) {
+	return c.client.Open(path)
+}
+
+func (c sftpRemoteClient) OpenFile(path string, flags int) (io.WriteCloser, error) {
+	return c.client.OpenFile(path, flags)
+}
+
+func (c sftpRemoteClient) Chmod(path string, mode os.FileMode) error {
+	return c.client.Chmod(path, mode)
+}
+
 // Transferer uploads the agent binary to the remote host and caches
 // it by SHA-256 hash so repeat uploads are skipped.
 type Transferer struct {
 	sftp       SFTPProvider
+	remote     remoteFileClient
 	localPath  string // path to the local agent binary
 	remotePath string // destination on remote host
 	log        *slog.Logger
@@ -27,6 +50,12 @@ type Transferer struct {
 	mu          sync.Mutex
 	transferred bool
 	localHash   string
+}
+
+func newWithRemoteClient(remote remoteFileClient, localPath, remotePath string, log *slog.Logger) *Transferer {
+	t := New(nil, localPath, remotePath, log)
+	t.remote = remote
+	return t
 }
 
 // New creates a Transferer. localPath is the path to the pre-built
@@ -56,20 +85,21 @@ func (t *Transferer) Ensure() (string, error) {
 	}
 
 	t.log.Log(context.TODO(), logging.LevelTrace, "computing local agent hash", "path", t.localPath)
-	hash, err := t.computeLocalHash()
+	hash, err := hashFile(t.localPath)
 	if err != nil {
 		return "", fmt.Errorf("hash local agent binary: %w", err)
 	}
 	t.localHash = hash
 
-	client := t.sftp()
-	if client == nil {
-		return "", fmt.Errorf("sftp client is nil")
+	client, err := t.remoteClient()
+	if err != nil {
+		return "", err
 	}
 
-	// Check if remote already has this version.
-	hashPath := t.remotePath + ".sha256"
-	if existing, err := readRemoteFile(client, hashPath); err == nil && string(existing) == hash {
+	// Check the remote binary itself. A sidecar hash marker in /tmp is not a
+	// trust boundary because other remote users may be able to write it.
+	// This still creates a TOCTOU possibility though.
+	if remoteHash, err := hashRemoteFile(client, t.remotePath); err == nil && remoteHash == hash {
 		t.log.Debug("agent binary hash matches, skipping upload", "hash", hash[:12])
 		t.transferred = true
 		return t.remotePath, nil
@@ -81,40 +111,52 @@ func (t *Transferer) Ensure() (string, error) {
 		return "", fmt.Errorf("upload agent: %w", err)
 	}
 
-	// Write the hash marker.
-	if err := writeRemoteFile(client, hashPath, []byte(hash), 0o644); err != nil {
-		t.log.Warn("failed to write hash marker (non-fatal)", "error", err)
-	}
-
 	t.transferred = true
 	t.log.Debug("agent binary transferred", "remote", t.remotePath, "hash", hash[:12])
 	return t.remotePath, nil
 }
 
-func (t *Transferer) computeLocalHash() (string, error) {
-	f, err := os.Open(t.localPath)
+func (t *Transferer) remoteClient() (remoteFileClient, error) {
+	if t.remote != nil {
+		return t.remote, nil
+	}
+	if t.sftp == nil {
+		return nil, fmt.Errorf("sftp client is nil")
+	}
+	client := t.sftp()
+	if client == nil {
+		return nil, fmt.Errorf("sftp client is nil")
+	}
+	return sftpRemoteClient{client: client}, nil
+}
+
+func hashFile(path string) (string, error) {
+	f, err := os.Open(path)
 	if err != nil {
 		return "", err
 	}
 	defer f.Close()
+	return hashReader(f)
+}
 
+func hashRemoteFile(client remoteFileClient, path string) (string, error) {
+	f, err := client.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	return hashReader(f)
+}
+
+func hashReader(r io.Reader) (string, error) {
 	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
+	if _, err := io.Copy(h, r); err != nil {
 		return "", err
 	}
 	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
 
-func readRemoteFile(client *sftp.Client, path string) ([]byte, error) {
-	f, err := client.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	return io.ReadAll(f)
-}
-
-func uploadFile(client *sftp.Client, localPath, remotePath string, mode os.FileMode) error {
+func uploadFile(client remoteFileClient, localPath, remotePath string, mode os.FileMode) error {
 	src, err := os.Open(localPath)
 	if err != nil {
 		return err
@@ -135,19 +177,4 @@ func uploadFile(client *sftp.Client, localPath, remotePath string, mode os.FileM
 	}
 
 	return client.Chmod(remotePath, mode)
-}
-
-func writeRemoteFile(client *sftp.Client, path string, data []byte, mode os.FileMode) error {
-	f, err := client.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC)
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(data); err != nil {
-		_ = f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	return client.Chmod(path, mode)
 }
