@@ -1,0 +1,71 @@
+# Log verbosity: trace, debug, info, warn, error
+log_level = "info"
+
+[remote]
+# Remote host OS and architecture used to select the agent binary.
+# Defaults to the local machine's runtime.GOOS / runtime.GOARCH.
+# os = "linux"
+# arch = "amd64"
+
+[remote.ssh]
+# host can be either a literal hostname/IP or a Host alias defined in
+# ~/.ssh/config. Identity keys, known_hosts, algorithms, and keepalive
+# intervals are resolved from the user's ssh_config.
+host = "remote.server.example.com"
+# user and port are optional; when set, they override the values
+# resolved from ssh_config.
+# user = "dev"
+# port = 22
+
+[container]
+# Commands that run locally inside the container instead of being forwarded
+# to the remote. Three matching forms are supported:
+#   /usr/bin/env    — full absolute path match
+#   /^python.*/     — regex match (delimited by slashes)
+#   env             — basename match (last segment of the executable path)
+local_commands = ["/usr/bin/env"]
+# working_dir = "/workspace"
+
+# Docker Compose-style mounts: [local_path:]remote_path
+# A single path means the same path is used on both remote and container.
+# If working_dir is not set, the first mounted dir becomes your working dir.
+mounts = [
+    "/workspace",
+    "/some/local/path:/some/remote/path",
+]
+
+# Env vars to strip from the container process (the executable launched
+# by machineproxy directly). Patterns are globs or /regex/ delimited.
+# env_remove = ["MPROXY_*"]
+
+# Agent env filtering controls which variables are forwarded to the remote.
+# Env vars added or changed by the parent process (after the hook is loaded)
+# are always forwarded. For inherited (unchanged) vars, only those matching
+# env_keep patterns are sent; any matching env_remove are always stripped.
+# env_remove takes priority over env_keep.
+# Patterns are globs (filepath.Match syntax) or /regex/ delimited.
+#
+# [agent]
+# env_keep = [
+#     "HOME", "PATH", "TERM", "LANG", "LC_*",
+#     "USER", "LOGNAME", "SHELL",
+#     "EDITOR", "VISUAL", "PAGER",
+#     "TZ", "DISPLAY", "SSH_AUTH_SOCK", "XDG_*",
+#     "/^AWS_/",
+# ]
+# env_remove = [
+#     "LD_PRELOAD", "LD_LIBRARY_PATH",
+#     "MPROXY_*", "/SECRET/",
+# ]
+
+# Configure how MachineProxy finds its components.
+# All binary paths are auto-discovered from /usr/lib/machineproxy/ when omitted.
+# [components]
+# shim_path = "/usr/lib/machineproxy/mproxy-shim"
+# tracer_path = "/usr/lib/machineproxy/mproxy-tracer"
+# agent_local_path = "/usr/lib/machineproxy/agent/linux/amd64/mproxy-agent"
+# agent_remote_path = "/tmp/mproxy-agent"
+
+# Record the session in MachineProxy's wire format.
+# [recording]
+# path = "/tmp/machineproxy-session.rec"

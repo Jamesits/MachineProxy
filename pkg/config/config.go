@@ -3,13 +3,10 @@ package config
 import (
 	"errors"
 	"fmt"
-	"io"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
 // Mount represents a parsed container mount entry in docker-compose style.
@@ -47,7 +44,7 @@ func ParseMount(s string) (Mount, error) {
 
 // Config describes machineproxy runtime behavior.
 type Config struct {
-	LogLevel string `yaml:"log_level"` // trace, debug, info, warn, error
+	LogLevel string `yaml:"log_level" toml:"log_level" json:"log_level"` // trace, debug, info, warn, error
 
 	Remote struct {
 		// SSH is resolved via the user's ssh_config (see ssh_config(5)).
@@ -55,53 +52,36 @@ type Config struct {
 		// in ~/.ssh/config; User and Port, when set, override the resolved
 		// values from ssh_config.
 		SSH struct {
-			Host string `yaml:"host"`
-			User string `yaml:"user"`
-			Port int    `yaml:"port"`
-		} `yaml:"ssh"`
-		OS   string `yaml:"os"`   // remote OS for agent binary resolution; defaults to runtime.GOOS
-		Arch string `yaml:"arch"` // remote arch for agent binary resolution; defaults to runtime.GOARCH
-	} `yaml:"remote"`
+			Host string `yaml:"host" toml:"host" json:"host"`
+			User string `yaml:"user" toml:"user" json:"user"`
+			Port int    `yaml:"port" toml:"port" json:"port"`
+		} `yaml:"ssh" toml:"ssh" json:"ssh"`
+		OS   string `yaml:"os" toml:"os" json:"os"`       // remote OS for agent binary resolution; defaults to runtime.GOOS
+		Arch string `yaml:"arch" toml:"arch" json:"arch"` // remote arch for agent binary resolution; defaults to runtime.GOARCH
+	} `yaml:"remote" toml:"remote" json:"remote"`
 
 	Container struct {
-		LocalCommands []string `yaml:"local_commands"`
-		Mounts        []string `yaml:"mounts"`      // docker-compose style: [local:]remote
-		WorkingDir    string   `yaml:"working_dir"` // override container working directory; defaults to first mount's local path
-		EnvRemove     []string `yaml:"env_remove"`  // glob/regex patterns for env vars to strip from the container process
-	} `yaml:"container"`
+		LocalCommands []string `yaml:"local_commands" toml:"local_commands" json:"local_commands"`
+		Mounts        []string `yaml:"mounts" toml:"mounts" json:"mounts"`                   // docker-compose style: [local:]remote
+		WorkingDir    string   `yaml:"working_dir" toml:"working_dir" json:"working_dir"`    // override container working directory; defaults to first mount's local path
+		EnvRemove     []string `yaml:"env_remove" toml:"env_remove" json:"env_remove"`       // glob/regex patterns for env vars to strip from the container process
+	} `yaml:"container" toml:"container" json:"container"`
 
 	Agent struct {
-		EnvKeep   []string `yaml:"env_keep"`   // glob/regex patterns for inherited env vars to forward to remote
-		EnvRemove []string `yaml:"env_remove"` // glob/regex patterns for env vars to always strip from remote
-	} `yaml:"agent"`
+		EnvKeep   []string `yaml:"env_keep" toml:"env_keep" json:"env_keep"`         // glob/regex patterns for inherited env vars to forward to remote
+		EnvRemove []string `yaml:"env_remove" toml:"env_remove" json:"env_remove"`   // glob/regex patterns for env vars to always strip from remote
+	} `yaml:"agent" toml:"agent" json:"agent"`
 
 	Components struct {
-		ShimPath        string `yaml:"shim_path"`
-		TracerPath      string `yaml:"tracer_path"`
-		AgentLocalPath  string `yaml:"agent_local_path"`
-		AgentRemotePath string `yaml:"agent_remote_path"`
-	} `yaml:"components"`
+		ShimPath        string `yaml:"shim_path" toml:"shim_path" json:"shim_path"`
+		TracerPath      string `yaml:"tracer_path" toml:"tracer_path" json:"tracer_path"`
+		AgentLocalPath  string `yaml:"agent_local_path" toml:"agent_local_path" json:"agent_local_path"`
+		AgentRemotePath string `yaml:"agent_remote_path" toml:"agent_remote_path" json:"agent_remote_path"`
+	} `yaml:"components" toml:"components" json:"components"`
 
 	Recording struct {
-		Path string `yaml:"path"` // empty disables recording
-	} `yaml:"recording"`
-}
-
-func Load(r io.Reader) (*Config, error) {
-	dec := yaml.NewDecoder(r)
-	dec.KnownFields(true)
-
-	var cfg Config
-	if err := dec.Decode(&cfg); err != nil {
-		return nil, fmt.Errorf("decode config: %w", err)
-	}
-	if err := cfg.applyDefaults(); err != nil {
-		return nil, err
-	}
-	if err := cfg.Validate(); err != nil {
-		return nil, err
-	}
-	return &cfg, nil
+		Path string `yaml:"path" toml:"path" json:"path"` // empty disables recording
+	} `yaml:"recording" toml:"recording" json:"recording"`
 }
 
 func (c *Config) applyDefaults() error {

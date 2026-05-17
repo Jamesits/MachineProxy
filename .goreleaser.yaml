@@ -90,8 +90,8 @@ nfpms:
         dst: /usr/lib/machineproxy/mproxy-tracer
       - src: dist/agent/{{ .Os }}/{{ .Arch }}/mproxy-agent
         dst: /usr/lib/machineproxy/agent/{{ .Os }}/{{ .Arch }}/mproxy-agent
-      - src: config/machineproxy.example.yaml
-        dst: /usr/share/doc/machineproxy/examples/machineproxy.example.yaml
+      - src: config/machineproxy.example.toml
+        dst: /usr/share/doc/machineproxy/examples/machineproxy.example.toml
 
 checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"

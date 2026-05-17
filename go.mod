@@ -6,6 +6,7 @@ require (
 	github.com/fxamacker/cbor/v2 v2.9.2
 	github.com/hanwen/go-fuse/v2 v2.10.1
 	github.com/jamesits/sshconf v0.0.0-20260512082721-ef38420d2546
+	github.com/pelletier/go-toml/v2 v2.3.1
 	github.com/pkg/sftp v1.13.10
 	golang.org/x/crypto v0.51.0
 	golang.org/x/sys v0.44.0

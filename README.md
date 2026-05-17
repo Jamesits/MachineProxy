@@ -11,44 +11,44 @@ MachineProxy creates a mixed-reality environment for your agent, or for any othe
 
 Write a config file for your workspace:
 
-```yaml
-log_level: error
+```toml
+log_level = "error"
 
-remote:
-  # arch: amd64 # or arm64, defaults to the local machine's architecture
-  ssh:
-    # Replace with your SSH hostname or IP
-    # Supports reading host definitions in your SSH config
-    host: "192.0.2.2"
-    # user: "" # optional
+[remote]
+# arch = "amd64" # or arm64, defaults to the local machine's architecture
 
-container:
-  local_commands:
-    # A list of programs that you want to run locally
-    - amp
-    - codex
-    - claude
-    - findmnt
-    - node
-    - opencode
-    - qpdf
-    - rtk
-    - rg
-  mounts:
-    # A list of remote paths that you want the programs to access
-    - /path/to/your/workspace
-  env_remove:
-    # filter environment variables that the remote device does not need
-    - VSCODE_*
+[remote.ssh]
+# Replace with your SSH hostname or IP
+# Supports reading host definitions in your SSH config
+host = "192.0.2.2"
+# user = "" # optional
+
+[container]
+# A list of programs that you want to run locally
+local_commands = [
+    "amp",
+    "codex",
+    "claude",
+    "findmnt",
+    "node",
+    "opencode",
+    "qpdf",
+    "rtk",
+    "rg",
+]
+# A list of remote paths that you want the programs to access
+mounts = ["/path/to/your/workspace"]
+# filter environment variables that the remote device does not need
+env_remove = ["VSCODE_*"]
 ```
 
 Then run it:
 
 ```shell
-machineproxy --config <./config.yaml> -- <program>
+machineproxy --config <./config.toml> -- <program>
 ```
 
-See the [example config](/config/machineproxy.example.yaml) for less common use cases, including environment variable filtering.
+See the [example config](/config/machineproxy.example.toml) for less common use cases, including environment variable filtering.
 
 ## Development
 

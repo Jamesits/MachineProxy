@@ -29,7 +29,7 @@ func run() error {
 	var cfgPath string
 	var showVersion bool
 
-	flag.StringVar(&cfgPath, "config", "config/machineproxy.example.yaml", "path to machineproxy config file")
+	flag.StringVar(&cfgPath, "config", "machineproxy.toml", "path to machineproxy config file (TOML/YAML/JSON)")
 	flag.BoolVar(&showVersion, "version", false, "print version")
 	flag.Parse()
 
@@ -38,13 +38,7 @@ func run() error {
 		return nil
 	}
 
-	f, err := os.Open(cfgPath)
-	if err != nil {
-		return fmt.Errorf("open config %q: %w", cfgPath, err)
-	}
-	defer f.Close()
-
-	cfg, err := config.Load(f)
+	cfg, err := config.LoadFile(cfgPath)
 	if err != nil {
 		return fmt.Errorf("load config %q: %w", cfgPath, err)
 	}

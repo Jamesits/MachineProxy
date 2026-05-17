@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -327,5 +329,180 @@ container:
 	_, err := Load(strings.NewReader(raw))
 	if err == nil || !strings.Contains(err.Error(), "container.mounts") {
 		t.Fatalf("expected mounts validation error, got: %v", err)
+	}
+}
+
+func TestLoadParsesTOMLConfig(t *testing.T) {
+	raw := `
+log_level = "debug"
+
+[remote]
+os = "linux"
+arch = "arm64"
+
+[remote.ssh]
+host = "127.0.0.1"
+user = "dev"
+port = 2222
+
+[container]
+local_commands = ["/usr/bin/env", "/^python.*/"]
+mounts = ["/workspace", "/local:/remote"]
+`
+
+	cfg, err := Load(strings.NewReader(raw))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.LogLevel != "debug" {
+		t.Fatalf("expected log_level debug, got %q", cfg.LogLevel)
+	}
+	if cfg.Remote.SSH.Host != "127.0.0.1" || cfg.Remote.SSH.Port != 2222 {
+		t.Fatalf("unexpected ssh: %+v", cfg.Remote.SSH)
+	}
+	if cfg.Remote.OS != "linux" || cfg.Remote.Arch != "arm64" {
+		t.Fatalf("unexpected os/arch: %s/%s", cfg.Remote.OS, cfg.Remote.Arch)
+	}
+	if len(cfg.Container.LocalCommands) != 2 || len(cfg.Container.Mounts) != 2 {
+		t.Fatalf("unexpected container: %+v", cfg.Container)
+	}
+}
+
+func TestLoadTOMLRejectsUnknownFields(t *testing.T) {
+	raw := `
+log_level = "info"
+mystery_field = "nope"
+
+[remote.ssh]
+host = "127.0.0.1"
+
+[container]
+local_commands = ["/usr/bin/env"]
+mounts = ["/workspace"]
+`
+	_, err := Load(strings.NewReader(raw))
+	if err == nil || !strings.Contains(err.Error(), "toml") {
+		t.Fatalf("expected toml decode error for unknown field, got: %v", err)
+	}
+}
+
+func TestDetectFormat(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want Format
+	}{
+		{"yaml mapping", "remote:\n  ssh:\n    host: x\n", FormatYAML},
+		{"yaml with inline array", "key: [a, b]\n", FormatYAML},
+		{"yaml with leading comments", "# a\n# b\nkey: v\n", FormatYAML},
+		{"toml section header", "[remote]\nhost = \"x\"\n", FormatTOML},
+		{"toml double-bracket", "[[servers]]\nname = \"x\"\n", FormatTOML},
+		{"toml with leading kv", "log_level = \"info\"\n\n[remote]\n", FormatTOML},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := detectFormat([]byte(tc.in)); got != tc.want {
+				t.Fatalf("detectFormat(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoadFileDetectsByExtension(t *testing.T) {
+	dir := t.TempDir()
+
+	// TOML body with no section header — only extension can pick TOML.
+	tomlOnly := `log_level = "warn"
+[remote.ssh]
+host = "1.2.3.4"
+[container]
+local_commands = ["/usr/bin/env"]
+mounts = ["/workspace"]
+`
+	tomlPath := filepath.Join(dir, "cfg.toml")
+	if err := os.WriteFile(tomlPath, []byte(tomlOnly), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFile(tomlPath)
+	if err != nil {
+		t.Fatalf("LoadFile(toml) error = %v", err)
+	}
+	if cfg.Remote.SSH.Host != "1.2.3.4" || cfg.LogLevel != "warn" {
+		t.Fatalf("unexpected toml decode: %+v / %s", cfg.Remote.SSH, cfg.LogLevel)
+	}
+
+	yamlBody := `remote:
+  ssh:
+    host: 5.6.7.8
+container:
+  local_commands: [/usr/bin/env]
+  mounts: [/workspace]
+`
+	yamlPath := filepath.Join(dir, "cfg.yaml")
+	if err := os.WriteFile(yamlPath, []byte(yamlBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = LoadFile(yamlPath)
+	if err != nil {
+		t.Fatalf("LoadFile(yaml) error = %v", err)
+	}
+	if cfg.Remote.SSH.Host != "5.6.7.8" {
+		t.Fatalf("unexpected yaml decode host: %q", cfg.Remote.SSH.Host)
+	}
+}
+
+func TestLoadParsesJSONConfig(t *testing.T) {
+	dir := t.TempDir()
+	raw := `{
+  "log_level": "debug",
+  "remote": {
+    "ssh": {"host": "10.0.0.1", "user": "dev", "port": 2222},
+    "os": "linux",
+    "arch": "amd64"
+  },
+  "container": {
+    "local_commands": ["/usr/bin/env"],
+    "mounts": ["/workspace"]
+  }
+}
+`
+	path := filepath.Join(dir, "cfg.json")
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile(json) error = %v", err)
+	}
+	if cfg.LogLevel != "debug" {
+		t.Fatalf("expected log_level debug, got %q", cfg.LogLevel)
+	}
+	if cfg.Remote.SSH.Host != "10.0.0.1" || cfg.Remote.SSH.Port != 2222 {
+		t.Fatalf("unexpected ssh: %+v", cfg.Remote.SSH)
+	}
+	if len(cfg.Container.LocalCommands) != 1 || cfg.Container.LocalCommands[0] != "/usr/bin/env" {
+		t.Fatalf("unexpected local_commands: %#v", cfg.Container.LocalCommands)
+	}
+}
+
+func TestLoadFileFallsBackToContentSniff(t *testing.T) {
+	dir := t.TempDir()
+	body := `[remote.ssh]
+host = "9.9.9.9"
+[container]
+local_commands = ["/usr/bin/env"]
+mounts = ["/workspace"]
+`
+	// No recognized extension — must sniff and pick TOML.
+	path := filepath.Join(dir, "cfg.conf")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile sniff error = %v", err)
+	}
+	if cfg.Remote.SSH.Host != "9.9.9.9" {
+		t.Fatalf("unexpected sniffed host: %q", cfg.Remote.SSH.Host)
 	}
 }

@@ -5,12 +5,13 @@ You do not need to read `README.md`; it is for humans.
 Run a program locally while it accesses files and executes commands on a remote machine over SSH.
 
 ## Tech Stack
-- Use Go for everything, and build with Goreleaser.
-- All machine-to-machine protocols should use CBOR serialization.
-- Containers use Bubblewrap. Use `man bwrap` to read its usage.
+- Use Go for everything, and build with Goreleaser
+- All machine-to-machine protocols should use CBOR serialization
+- Containers use Bubblewrap. Use `man bwrap` to read its usage
 
 ## Code Style
-- Use comments to document higher-level intent.
+- Use comments to document higher-level intent
+- Run `go fmt ./...`, `go vet ./...` and `golangci-lint run` after code change
 
 ## Compilation
 Always perform a full rebuild with `goreleaser build --snapshot --clean`, and use the artifacts under `dist/`.

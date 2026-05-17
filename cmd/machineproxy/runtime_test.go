@@ -13,7 +13,7 @@ func TestCreateBrokerSocketPathUsesPrivateDirectory(t *testing.T) {
 	}
 
 	dir := filepath.Dir(socketPath)
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 	info, err := os.Stat(dir)
 	if err != nil {
 		t.Fatalf("stat socket dir: %v", err)
