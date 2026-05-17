@@ -147,17 +147,30 @@ func (d *runtimeDeps) MountWorkspace(ctx context.Context) error {
 	}
 
 	d.log.Log(ctx, logging.LevelTrace, "mounting workspace", "remote_path", mount.RemotePath)
-	tmpDir, err := os.MkdirTemp("", "machineproxy-fuse-*")
-	if err != nil {
-		return fmt.Errorf("create temp mountpoint: %w", err)
-	}
-	d.fuseMountDir = tmpDir
 
 	raw := d.sshManager.SFTP()
 	sftpClient, ok := raw.(*sftp.Client)
 	if !ok {
 		return fmt.Errorf("ssh sftp client is not *sftp.Client")
 	}
+
+       // Verify the remote workspace is reachable up front. Without this check,
+       // FUSE happily mounts an unusable backend and the failure surfaces later
+       // as a confusing "bwrap: source No such file or directory" because every
+       // stat on the mountpoint forwards to a failing SFTP Stat.
+       st, err := sftpClient.Stat(mount.RemotePath)
+       if err != nil {
+               return fmt.Errorf("remote workspace %q not reachable: %w", mount.RemotePath, err)
+       }
+       if !st.IsDir() {
+               return fmt.Errorf("remote workspace %q is not a directory", mount.RemotePath)
+       }
+
+       tmpDir, err := os.MkdirTemp("", "machineproxy-fuse-*")
+       if err != nil {
+               return fmt.Errorf("create temp mountpoint: %w", err)
+       }
+       d.fuseMountDir = tmpDir
 
 	fsLog := d.log.With("component", "fuse")
 	backend := workspacefs.New(&workspacefs.SFTPAdapter{C: sftpClient}, mount.RemotePath, fsLog)
