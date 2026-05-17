@@ -238,10 +238,12 @@ func (t *Tracer) handleSyscallStop(pid int) {
 	isExecveat := sysno == uint64(SysExecveat())
 
 	pathname, err := ReadString(pid, regs.PathAddr(isExecveat))
-	if err != nil || t.shouldAllow(pathname) {
-		if err == nil {
-			t.log.Log(context.TODO(), logging.LevelTrace, "exec allowed (whitelisted)", "pid", pid, "path", pathname)
-		}
+	if err != nil {
+		t.blockExec(pid, regs, "read exec path", err)
+		return
+	}
+	if t.shouldAllow(pathname) {
+		t.log.Log(context.TODO(), logging.LevelTrace, "exec allowed (whitelisted)", "pid", pid, "path", pathname)
 		return
 	}
 
@@ -249,10 +251,12 @@ func (t *Tracer) handleSyscallStop(pid int) {
 
 	argv, err := ReadStringArray(pid, regs.ArgvAddr(isExecveat))
 	if err != nil {
+		t.blockExec(pid, regs, "read argv", err)
 		return
 	}
 	envp, err := ReadStringArray(pid, regs.EnvpAddr(isExecveat))
 	if err != nil {
+		t.blockExec(pid, regs, "read envp", err)
 		return
 	}
 
@@ -275,6 +279,7 @@ func (t *Tracer) handleSyscallStop(pid int) {
 
 	shimPathBytes := append([]byte(t.cfg.ShimPath), 0)
 	if err := WriteBytes(pid, cursor, shimPathBytes); err != nil {
+		t.blockExec(pid, regs, "write shim path", err)
 		return
 	}
 	newPathAddr := cursor
@@ -284,19 +289,33 @@ func (t *Tracer) handleSyscallStop(pid int) {
 	newArgvAddr := cursor
 	n, err := WriteStringArray(pid, cursor, newArgv)
 	if err != nil {
+		t.blockExec(pid, regs, "write argv", err)
 		return
 	}
 	cursor = alignUp(cursor + uintptr(n))
 
 	newEnvpAddr := cursor
 	if _, err := WriteStringArray(pid, cursor, newEnvp); err != nil {
+		t.blockExec(pid, regs, "write envp", err)
 		return
 	}
 
 	regs.SetPathAddr(isExecveat, newPathAddr)
 	regs.SetArgvAddr(isExecveat, newArgvAddr)
 	regs.SetEnvpAddr(isExecveat, newEnvpAddr)
-	_ = regs.Set(pid)
+	if err := regs.Set(pid); err != nil {
+		t.log.Warn("failed to commit exec rewrite; killing tracee", "pid", pid, "path", pathname, "error", err)
+		_ = unix.Kill(pid, syscall.SIGKILL)
+	}
+}
+
+func (t *Tracer) blockExec(pid int, regs *SyscallRegs, step string, err error) {
+	t.log.Warn("blocking exec after rewrite failure", "pid", pid, "step", step, "error", err)
+	regs.BlockSyscall()
+	if setErr := regs.Set(pid); setErr != nil {
+		t.log.Warn("failed to block syscall; killing tracee", "pid", pid, "error", setErr)
+		_ = unix.Kill(pid, syscall.SIGKILL)
+	}
 }
 
 func estimateWriteSize(shimPath string, argv, envp []string) int {

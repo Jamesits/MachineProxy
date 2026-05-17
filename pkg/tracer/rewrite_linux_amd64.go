@@ -51,6 +51,12 @@ func (r *SyscallRegs) SyscallNum() uint64 {
 	return r.regs.Orig_rax
 }
 
+// BlockSyscall replaces the pending syscall with an invalid syscall number so
+// a failed rewrite cannot fall through and execute locally.
+func (r *SyscallRegs) BlockSyscall() {
+	r.regs.Orig_rax = ^uint64(0)
+}
+
 // PathAddr returns the pointer to the pathname argument.
 // For execve this is arg0 (rdi), for execveat it's arg1 (rsi).
 func (r *SyscallRegs) PathAddr(isExecveat bool) uintptr {
