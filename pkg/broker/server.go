@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/jamesits/machineproxy/pkg/logging"
 	"github.com/jamesits/machineproxy/pkg/remoteexec"
@@ -30,6 +31,8 @@ type Server struct {
 	connWG sync.WaitGroup
 }
 
+var socketUmaskMu sync.Mutex
+
 func NewServer(deps Deps) *Server {
 	log := deps.Log
 	if log == nil {
@@ -40,7 +43,7 @@ func NewServer(deps Deps) *Server {
 
 func (s *Server) Start(ctx context.Context, socketPath string) error {
 	_ = os.Remove(socketPath)
-	ln, err := net.Listen("unix", socketPath)
+	ln, err := listenUnixPrivate(socketPath)
 	if err != nil {
 		return err
 	}
@@ -67,6 +70,17 @@ func (s *Server) Start(ctx context.Context, socketPath string) error {
 			s.serveConn(ctx, conn)
 		}()
 	}
+}
+
+func listenUnixPrivate(socketPath string) (net.Listener, error) {
+	socketUmaskMu.Lock()
+	defer socketUmaskMu.Unlock()
+
+	// Unix socket permissions are derived from the process umask at creation
+	// time; force a private mask so the broker control channel is not shared.
+	oldUmask := syscall.Umask(0o077)
+	defer syscall.Umask(oldUmask)
+	return net.Listen("unix", socketPath)
 }
 
 func (s *Server) serveConn(ctx context.Context, conn net.Conn) {

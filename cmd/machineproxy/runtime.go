@@ -7,7 +7,9 @@ import (
 	"log/slog"
 	"os"
 	"os/user"
+	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/hanwen/go-fuse/v2/fuse"
@@ -29,14 +31,15 @@ type runtimeDeps struct {
 	cfg *config.Config
 	log *slog.Logger
 
-	sshAddr      string // resolved "host:port" after ssh_config lookup
-	sshManager   *sshconn.Manager
-	namespace    *ns.Namespace
-	fuseServer   *fuse.Server
-	bkr          *broker.Server
-	fuseMountDir string
-	recorder     *agentproto.Recorder
-	brokerSocket string // auto-generated temp socket path
+	sshAddr         string // resolved "host:port" after ssh_config lookup
+	sshManager      *sshconn.Manager
+	namespace       *ns.Namespace
+	fuseServer      *fuse.Server
+	bkr             *broker.Server
+	fuseMountDir    string
+	recorder        *agentproto.Recorder
+	brokerSocket    string // auto-generated temp socket path
+	brokerSocketDir string // private directory containing broker socket
 
 	brokerCtxCancel context.CancelFunc
 }
@@ -80,6 +83,12 @@ func (d *runtimeDeps) Close() {
 	// Clean up the broker socket to prevent leak.
 	if d.brokerSocket != "" {
 		_ = os.Remove(d.brokerSocket)
+	}
+	if d.brokerSocketDir != "" {
+		if err := os.RemoveAll(d.brokerSocketDir); err != nil {
+			d.log.Warn("failed to remove broker socket dir", "error", err)
+		}
+		d.brokerSocketDir = ""
 	}
 	if d.fuseServer != nil {
 		if err := d.fuseServer.Unmount(); err != nil {
@@ -154,23 +163,23 @@ func (d *runtimeDeps) MountWorkspace(ctx context.Context) error {
 		return fmt.Errorf("ssh sftp client is not *sftp.Client")
 	}
 
-       // Verify the remote workspace is reachable up front. Without this check,
-       // FUSE happily mounts an unusable backend and the failure surfaces later
-       // as a confusing "bwrap: source No such file or directory" because every
-       // stat on the mountpoint forwards to a failing SFTP Stat.
-       st, err := sftpClient.Stat(mount.RemotePath)
-       if err != nil {
-               return fmt.Errorf("remote workspace %q not reachable: %w", mount.RemotePath, err)
-       }
-       if !st.IsDir() {
-               return fmt.Errorf("remote workspace %q is not a directory", mount.RemotePath)
-       }
+	// Verify the remote workspace is reachable up front. Without this check,
+	// FUSE happily mounts an unusable backend and the failure surfaces later
+	// as a confusing "bwrap: source No such file or directory" because every
+	// stat on the mountpoint forwards to a failing SFTP Stat.
+	st, err := sftpClient.Stat(mount.RemotePath)
+	if err != nil {
+		return fmt.Errorf("remote workspace %q not reachable: %w", mount.RemotePath, err)
+	}
+	if !st.IsDir() {
+		return fmt.Errorf("remote workspace %q is not a directory", mount.RemotePath)
+	}
 
-       tmpDir, err := os.MkdirTemp("", "machineproxy-fuse-*")
-       if err != nil {
-               return fmt.Errorf("create temp mountpoint: %w", err)
-       }
-       d.fuseMountDir = tmpDir
+	tmpDir, err := os.MkdirTemp("", "machineproxy-fuse-*")
+	if err != nil {
+		return fmt.Errorf("create temp mountpoint: %w", err)
+	}
+	d.fuseMountDir = tmpDir
 
 	fsLog := d.log.With("component", "fuse")
 	backend := workspacefs.New(&workspacefs.SFTPAdapter{C: sftpClient}, mount.RemotePath, fsLog)
@@ -184,19 +193,13 @@ func (d *runtimeDeps) MountWorkspace(ctx context.Context) error {
 }
 
 func (d *runtimeDeps) StartBroker(ctx context.Context) error {
-	// Generate a random temporary socket path to avoid collisions.
-	f, err := os.CreateTemp("", "machineproxy-*.sock")
+	// Keep the broker socket in a private directory so only this user can
+	// connect to the control channel that can launch remote commands.
+	socketPath, err := createBrokerSocketPath()
 	if err != nil {
-		return fmt.Errorf("create temp broker socket: %w", err)
+		return fmt.Errorf("create broker socket path: %w", err)
 	}
-	socketPath := f.Name()
-	if err := f.Close(); err != nil {
-		d.log.Warn("close temp broker socket file", "path", socketPath, "error", err)
-	}
-	// broker.Start will create the Unix socket at this path; remove the placeholder first.
-	if err := os.Remove(socketPath); err != nil {
-		d.log.Warn("remove temp broker socket placeholder", "path", socketPath, "error", err)
-	}
+	d.brokerSocketDir = filepath.Dir(socketPath)
 	d.brokerSocket = socketPath
 
 	d.log.Log(ctx, logging.LevelTrace, "starting broker", "socket", socketPath)
@@ -315,6 +318,19 @@ func (d *runtimeDeps) StartBroker(ctx context.Context) error {
 		case <-ticker.C:
 		}
 	}
+}
+
+func createBrokerSocketPath() (string, error) {
+	// Directory creation is also guarded by a private umask so the entire
+	// broker control path remains private even under permissive parent umasks.
+	oldUmask := syscall.Umask(0o077)
+	defer syscall.Umask(oldUmask)
+
+	dir, err := os.MkdirTemp("", "machineproxy-*")
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "broker.sock"), nil
 }
 
 func (d *runtimeDeps) RunChild(ctx context.Context, cmdline []string) error {

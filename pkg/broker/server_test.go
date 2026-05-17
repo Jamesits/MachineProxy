@@ -6,10 +6,51 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
+
+func TestBrokerStartCreatesPrivateSocketWithPermissiveUmask(t *testing.T) {
+	oldUmask := syscall.Umask(0)
+	defer syscall.Umask(oldUmask)
+
+	srv := NewServer(Deps{})
+	socketPath := filepath.Join(t.TempDir(), "broker.sock")
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- srv.Start(ctx, socketPath)
+	}()
+
+	deadline := time.After(2 * time.Second)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-deadline:
+			cancel()
+			<-done
+			t.Fatalf("broker socket was not created")
+		case <-ticker.C:
+			info, err := os.Stat(socketPath)
+			if err != nil {
+				continue
+			}
+			cancel()
+			if err := <-done; err != nil {
+				t.Fatalf("broker start returned error: %v", err)
+			}
+			if got := info.Mode().Perm(); got&0o077 != 0 {
+				t.Fatalf("socket mode = %o, want no group/other permissions", got)
+			}
+			return
+		}
+	}
+}
 
 func TestBrokerForwardsStdioAndExitCode(t *testing.T) {
 	srv := NewServer(Deps{Remote: fakeRemoteRunner{
