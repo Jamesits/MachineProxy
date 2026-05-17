@@ -54,15 +54,28 @@ env_remove = [
 #
 # [agent]
 # env_keep = [
-#     "HOME", "PATH", "TERM", "LANG", "LC_*",
-#     "USER", "LOGNAME", "SHELL",
-#     "EDITOR", "VISUAL", "PAGER",
-#     "TZ", "DISPLAY", "SSH_AUTH_SOCK", "XDG_*",
+#     "HOME",
+#     "PATH",
+#     "TERM",
+#     "LANG",
+#     "LC_*",
+#     "USER",
+#     "LOGNAME",
+#     "SHELL",
+#     "EDITOR",
+#     "VISUAL",
+#     "PAGER",
+#     "TZ",
+#     "DISPLAY",
+#     "SSH_AUTH_SOCK",
+#     "XDG_*",
 #     "/^AWS_/",
 # ]
 # env_remove = [
-#     "LD_PRELOAD", "LD_LIBRARY_PATH",
-#     "MPROXY_*", "/SECRET/",
+#     "LD_PRELOAD",
+#     "LD_LIBRARY_PATH",
+#     "MPROXY_*",
+#     "/SECRET/",
 # ]
 
 # Configure how MachineProxy finds its components.

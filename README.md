@@ -33,7 +33,6 @@ local_commands = [
     "amp",
     "codex",
     "claude",
-    "findmnt",
     "node",
     "opencode",
     "qpdf",
