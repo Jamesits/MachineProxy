@@ -4,7 +4,7 @@ MachineProxy solves the last-hop problem for your AI agent, even when the target
 
 ![Project Status - Premature](https://img.shields.io/badge/Project_Status-Premature-yellow)
 ![100% AI Code](https://img.shields.io/badge/AI_Code-100%25-blue)
-![Reviewed by A Human](https://img.shields.io/badge/reviewed_by-a_human-green)
+![Reviewed by a Human](https://img.shields.io/badge/Reviewed_by-a_Human-green)
 [![Go Reference](https://pkg.go.dev/badge/github.com/jamesits/machineproxy.svg)](https://pkg.go.dev/github.com/jamesits/machineproxy)
 
 MachineProxy creates a mixed-reality environment for your agent, or for any other program. The program itself runs locally, while seeing and acting on another machine over SSH.
@@ -97,7 +97,7 @@ The program is launched with a quasi-remote environment.
 
 ### Compatibility
 
-MachineProxy supports Linux only, for both local and remote devices. Golang runtime requires Linux 3.2 or later.
+MachineProxy supports Linux only, for both local and remote devices. Golang runtime requires Linux 3.2 or later; [support differs on different architectures](https://go.dev/wiki/MinimumRequirements#linuxlinux).
 
 MachineProxy remote agent (`mproxy-agent`) must be compiled in the remote device's architecture. The official packages contains `amd64` (v1) and `arm64` (v8) builds.
 
