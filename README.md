@@ -1,26 +1,62 @@
 # MachineProxy
 
-Solves the last hop problem for your AI agent, no matter if its target is outdated or have no Internet access.
+MachineProxy solves the last-hop problem for your AI agent, even when the target machine is outdated or has no Internet access.
 
 ![Project Status - Premature](https://img.shields.io/badge/Project_Status-Premature-yellow)
 ![100% AI Code](https://img.shields.io/badge/AI_Code-100%25-blue)
 
-MachineProxy creates a mixed reality environment for your agent (or any program). The program itself runs locally, while it sees and acts on another machine over SSH.
+MachineProxy creates a mixed-reality environment for your agent, or for any other program. The program itself runs locally, while seeing and acting on another machine over SSH.
 
 ## Usage
 
-```shell
-machineproxy --config <./config.yaml> <program>
+Write a config file for your workspace:
+
+```yaml
+log_level: error
+
+remote:
+  # arch: amd64 # or arm64, defaults to the local machine's architecture
+  ssh:
+    # Replace with your SSH hostname or IP
+    # Supports reading host definitions in your SSH config
+    host: "192.0.2.2"
+    # user: "" # optional
+
+container:
+  local_commands:
+    # A list of programs that you want to run locally
+    - claude
+    - vim
+    - rtk
+    - findmnt
+    - amp
+    - qpdf
+    - node
+    - rg
+    - pacman
+  mounts:
+    # A list of remote paths that you want the programs to access.
+    - /path/to/your/workspace
+  env_remove:
+    - VSCODE_*
 ```
 
-## Building
+Then run it:
+
+```shell
+machineproxy --config <./config.yaml> -- <program>
+```
+
+See the [example config](/config/machineproxy.example.yaml) for less common use cases, including environment variable filtering.
+
+## Development
 
 Requirements:
 
 - Golang
 - Goreleaser 2+
 - [Bubblewrap](https://github.com/containers/bubblewrap)
-- FUSE
+- [FUSE](https://sourceforge.net/projects/fuse/)
 
 Building:
 
@@ -32,11 +68,11 @@ goreleaser build --snapshot --clean
 
 ### Why
 
-Common CLI-based AI coding agents assume that it is running on the same device of the workspace. But this assumption is not always true:
+Common CLI-based AI coding agents assume they are running on the same device as the workspace. That assumption is not always true:
 
 - Some threat models forbid running an AI coding agent directly on certain devices
-- Some target devices are not qualified to run these modern, shiny NodeJS programs
-- Some environments do not work with software without proper packaging that come with "easy to use" one-liner install commands
+- Some target devices cannot run modern, resource-heavy Node.js programs
+- Some environments require properly packaged software instead of "easy-to-use" one-line install commands
 
 This program aims to work around these problems.
 
@@ -49,23 +85,23 @@ The program is launched with a quasi-remote environment.
 
 ### Compatibility
 
-This program is designed to work with most other programs, including and not limited to editors and CLI-based AI coding agents.
+This program is designed to work with most programs, including editors and CLI-based AI coding agents.
 
-This is dirty job. All common use cases are covered, but edge cases do exist and we cannot fix them all in theory.
+This is a dirty job. Common use cases are covered, but edge cases exist and some may be impossible to fix completely.
 
 ### Security
 
-DO NOT treat MachineProxy as a security barrier. The program launched by MachineProxy can run programs on both the local and remote device. Only run programs you trust, and only tell the AI to do what you trust it to do.
+DO NOT treat MachineProxy as a security barrier. Programs launched by MachineProxy can run commands on both the local and remote devices. Only run programs you trust, and only ask the AI to do things you trust it to do.
 
 #### Known Issues
 
 ##### Shells
 
-Some shell (`sh`, Bash, etc.) maintains a command cache for quick lookup of commands in the PATH. So if a command exists at the remote device but does not exist at the local device, it refuses to launch it. Use the full path (`/usr/bin/...`) to bypass the command cache instead.
+Some shells (`sh`, Bash, etc.) maintain a command cache for quick lookups in `PATH`. If a command exists on the remote device but not on the local device, the shell may refuse to launch it. Use the full path (`/usr/bin/...`) to bypass the command cache instead.
 
 ##### VSCode Terminal
 
-VSCode terminal seems to be overriding `/usr/bin/env node` for some reason, causing some programs (e.g. amp as in ampcode.com) fail to launch. If you are using MachineProxy from a VSCode terminal, run node programs like this (use `amp` as an example):
+VSCode Terminal seems to override `/usr/bin/env node` in some cases, causing some programs, such as Amp from ampcode.com, to fail to launch. If you are using MachineProxy from a VSCode Terminal, run Node.js programs like this, using `amp` as an example:
 
 ```shell
 machineproxy [...args] /usr/bin/node "$(which amp)" --no-ide
