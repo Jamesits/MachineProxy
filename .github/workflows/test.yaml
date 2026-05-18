@@ -1,0 +1,87 @@
+on:
+  pull_request:
+    paths-ignore:
+      - 'README.md'
+  push:
+    paths-ignore:
+      - 'README.md'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (${{ matrix.template }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        template:
+          - centos7
+          - debian-13
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          cache: false
+
+      - run: go mod download
+
+      - name: Generate SSH key
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519 -C "machineproxy-test"
+          {
+            echo "Host machineproxy-test"
+            echo "    Port 12222"
+            echo "    User root"
+            echo "    IdentityFile ~/.ssh/id_ed25519"
+            echo "    IdentitiesOnly yes"
+            echo "    LogLevel ERROR"
+            echo "    HostName ::1"
+          } > ~/.ssh/config
+          chmod 600 ~/.ssh/config
+          echo "AUTHORIZED_KEY=$(cat ~/.ssh/id_ed25519.pub)" >> "$GITHUB_ENV"
+
+      - name: Prepare workspace mount point
+        run: |
+          mkdir -p "test/ssh-server/${{ matrix.template }}/workspace"
+          chmod a+rwX "test/ssh-server/${{ matrix.template }}/workspace"
+
+      - name: Start SSH server (${{ matrix.template }})
+        working-directory: test/ssh-server/${{ matrix.template }}
+        run: |
+          docker compose up -d --build --wait --wait-timeout 60
+          docker compose ps
+
+      - name: Trust SSH host key
+        run: ssh-keyscan -p 12222 ::1 >> ~/.ssh/known_hosts
+
+      - name: Run unit and integration tests
+        env:
+          MPROXY_TEST_SSH_HOST: machineproxy-test
+          MPROXY_TEST_SSH_USER: root
+          MPROXY_TEST_SSH_PORT: "12222"
+          MPROXY_TEST_SSH_ADDR: "[::1]:12222"
+          MPROXY_TEST_SSH_KEY: /home/runner/.ssh/id_ed25519
+        run: |
+          go test -race -tags backend_ssh,backend_docker -count=1 ./...
+
+      - name: Capture SSH server logs
+        if: always()
+        working-directory: test/ssh-server/${{ matrix.template }}
+        run: docker compose logs --no-color
+
+      - name: Tear down SSH server
+        if: always()
+        working-directory: test/ssh-server/${{ matrix.template }}
+        run: docker compose down -v
