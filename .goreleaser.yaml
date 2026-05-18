@@ -64,14 +64,13 @@ archives:
       - machineproxy
       - mproxy-shim
       - mproxy-tracer
-      - mproxy-agent
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     formats:
       - tar.gz
-    format_overrides:
-      - goos: windows
-        formats:
-          - zip
+    files:
+      - src: dist/agent/**/mproxy-agent*
+        dst: agent
+        strip_parent: false
 
 nfpms:
   - id: machineproxy
@@ -94,10 +93,10 @@ nfpms:
     contents:
       - src: dist/mproxy-shim_{{ .Target }}/mproxy-shim
         dst: /usr/lib/machineproxy/mproxy-shim
+      - src: dist/agent/**/mproxy-agent*
+        dst: /usr/lib/machineproxy/agent
       - src: dist/mproxy-tracer_{{ .Target }}/mproxy-tracer
         dst: /usr/lib/machineproxy/mproxy-tracer
-      - src: dist/agent/{{ .Os }}/{{ .Arch }}/mproxy-agent
-        dst: /usr/lib/machineproxy/agent/{{ .Os }}/{{ .Arch }}/mproxy-agent
       - src: config/machineproxy.example.toml
         dst: /usr/share/doc/machineproxy/examples/machineproxy.example.toml
 
