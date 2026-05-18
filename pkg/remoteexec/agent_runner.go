@@ -77,7 +77,7 @@ func (r *AgentRunner) RunWithControl(ctx context.Context, req Request, ctrl *Con
 		return 127, fmt.Errorf("agent runner transferer is nil")
 	}
 
-	agentPath, err := r.Transferer.Ensure()
+	agentPath, err := r.Transferer.Ensure(ctx)
 	if err != nil {
 		return 127, fmt.Errorf("ensure agent binary: %w", err)
 	}
@@ -247,7 +247,7 @@ func (r *AgentRunner) EnumeratePaths(ctx context.Context, paths []string) ([]age
 		return nil, fmt.Errorf("agent runner transferer is nil")
 	}
 
-	agentPath, err := r.Transferer.Ensure()
+	agentPath, err := r.Transferer.Ensure(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ensure agent binary: %w", err)
 	}

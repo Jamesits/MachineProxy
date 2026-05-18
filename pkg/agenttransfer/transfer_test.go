@@ -2,6 +2,7 @@ package agenttransfer
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"log/slog"
 	"os"
@@ -24,7 +25,7 @@ func TestEnsureDoesNotTrustHashMarkerWhenRemoteBinaryDiffers(t *testing.T) {
 	remote.files["/tmp/mproxy-agent.sha256"] = []byte(hash)
 
 	transferer := newWithRemoteClient(remote, local, "/tmp/mproxy-agent", slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if _, err := transferer.Ensure(); err != nil {
+	if _, err := transferer.Ensure(context.Background()); err != nil {
 		t.Fatalf("ensure: %v", err)
 	}
 
@@ -43,7 +44,7 @@ func TestEnsureExpandsTildeAgainstRemoteHome(t *testing.T) {
 	transferer := newWithRemoteClient(remote, local, "~/.cache/machineproxy/mproxy-agent",
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 
-	got, err := transferer.Ensure()
+	got, err := transferer.Ensure(context.Background())
 	if err != nil {
 		t.Fatalf("ensure: %v", err)
 	}

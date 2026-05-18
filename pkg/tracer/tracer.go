@@ -34,6 +34,7 @@ type pidState struct {
 type Tracer struct {
 	cfg      Config
 	log      *slog.Logger
+	ctx      context.Context
 	baseline *EnvBaseline
 	pids     map[int]*pidState
 }
@@ -55,7 +56,8 @@ func New(cfg Config) *Tracer {
 // intercepting execve/execveat calls. Returns the exit code.
 // The optional onStart callback is invoked with the child pid after ptrace
 // is configured but before the trace loop begins (useful for signal forwarding).
-func (t *Tracer) Start(argv []string, env []string, onStart func(childPid int)) (int, error) {
+func (t *Tracer) Start(ctx context.Context, argv []string, env []string, onStart func(childPid int)) (int, error) {
+	t.ctx = ctx
 	runtime.LockOSThread() // ptrace is per-thread; never unlock
 
 	binary, err := exec.LookPath(argv[0])
@@ -160,7 +162,7 @@ func (t *Tracer) traceLoop(childPid int) int {
 			event == unix.PTRACE_EVENT_CLONE:
 			if newPid, err := unix.PtraceGetEventMsg(pid); err == nil {
 				np := int(newPid)
-				t.log.Log(context.TODO(), logging.LevelTrace, "new child process", "parent_pid", pid, "child_pid", np, "event", event)
+				t.log.Log(t.ctx, logging.LevelTrace, "new child process", "parent_pid", pid, "child_pid", np, "event", event)
 				if _, exists := t.pids[np]; !exists {
 					t.pids[np] = &pidState{expectStop: true}
 				}
@@ -249,11 +251,11 @@ func (t *Tracer) handleSyscallStop(pid int) {
 		return
 	}
 	if t.shouldAllow(pathname) {
-		t.log.Log(context.TODO(), logging.LevelTrace, "exec allowed (whitelisted)", "pid", pid, "path", pathname)
+		t.log.Log(t.ctx, logging.LevelTrace, "exec allowed (whitelisted)", "pid", pid, "path", pathname)
 		return
 	}
 
-	t.log.Log(context.TODO(), logging.LevelTrace, "exec intercepted, rewriting to shim", "pid", pid, "path", pathname)
+	t.log.Log(t.ctx, logging.LevelTrace, "exec intercepted, rewriting to shim", "pid", pid, "path", pathname)
 
 	argv, err := ReadStringArray(pid, regs.ArgvAddr(isExecveat))
 	if err != nil {

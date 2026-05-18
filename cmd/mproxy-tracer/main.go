@@ -19,6 +19,8 @@ func main() {
 		os.Exit(2)
 	}
 
+	ctx := context.Background()
+
 	log := logging.Setup(logLevel)
 	cfg.Log = log
 
@@ -31,11 +33,11 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGHUP)
 
 	log.Debug("starting tracer", "command", childArgs)
-	code, err := t.Start(childArgs, os.Environ(), func(childPid int) {
+	code, err := t.Start(ctx, childArgs, os.Environ(), func(childPid int) {
 		go func() {
 			for sig := range sigCh {
 				if s, ok := sig.(syscall.Signal); ok {
-					log.Log(context.TODO(), logging.LevelTrace, "forwarding signal to child", "signal", s, "pid", childPid)
+					log.Log(ctx, logging.LevelTrace, "forwarding signal to child", "signal", s, "pid", childPid)
 					_ = syscall.Kill(childPid, s)
 				}
 			}

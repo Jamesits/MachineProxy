@@ -88,22 +88,22 @@ func New(sftp SFTPProvider, localPath, remotePath string, log *slog.Logger) *Tra
 
 // Ensure uploads the agent binary if it is not already present (or
 // has changed). Returns the remote path.
-func (t *Transferer) Ensure() (string, error) {
+func (t *Transferer) Ensure(ctx context.Context) (string, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	if t.transferred {
-		t.log.Log(context.TODO(), logging.LevelTrace, "agent binary already transferred")
+		t.log.Log(ctx, logging.LevelTrace, "agent binary already transferred")
 		return t.remotePath, nil
 	}
 
-	t.log.Log(context.TODO(), logging.LevelTrace, "computing local agent hash", "path", t.localPath)
+	t.log.Log(ctx, logging.LevelTrace, "computing local agent hash", "path", t.localPath)
 	hash, err := hashFile(t.localPath)
 	if err != nil {
 		return "", fmt.Errorf("hash local agent binary: %w", err)
 	}
 	t.localHash = hash
-	t.log.Log(context.TODO(), logging.LevelTrace, "local agent hash", "path", t.localPath, "sha256", hash)
+	t.log.Log(ctx, logging.LevelTrace, "local agent hash", "path", t.localPath, "sha256", hash)
 
 	client, err := t.remoteClient()
 	if err != nil {
@@ -125,9 +125,9 @@ func (t *Transferer) Ensure() (string, error) {
 	// This still creates a TOCTOU possibility though.
 	remoteHash, remoteErr := hashRemoteFile(client, t.remotePath)
 	if remoteErr != nil {
-		t.log.Log(context.TODO(), logging.LevelTrace, "remote agent hash unavailable", "path", t.remotePath, "error", remoteErr)
+		t.log.Log(ctx, logging.LevelTrace, "remote agent hash unavailable", "path", t.remotePath, "error", remoteErr)
 	} else {
-		t.log.Log(context.TODO(), logging.LevelTrace, "remote agent hash", "path", t.remotePath, "sha256", remoteHash)
+		t.log.Log(ctx, logging.LevelTrace, "remote agent hash", "path", t.remotePath, "sha256", remoteHash)
 	}
 	if remoteErr == nil && remoteHash == hash {
 		t.log.Debug("agent binary hash matches, skipping upload", "hash", hash[:12])

@@ -1,6 +1,7 @@
 package initcmd
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"os"
@@ -20,7 +21,7 @@ func TestLookPathFindsExecutable(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	got, err := LookPath(testLog(t), "hello", dir)
+	got, err := LookPath(context.Background(), testLog(t), "hello", dir)
 	if err != nil {
 		t.Fatalf("LookPath: %v", err)
 	}
@@ -40,7 +41,7 @@ func TestLookPathSkipsDirectory(t *testing.T) {
 		}
 	}
 
-	got, err := LookPath(testLog(t), "hello", skipDir+":"+keepDir, skipDir)
+	got, err := LookPath(context.Background(), testLog(t), "hello", skipDir+":"+keepDir, skipDir)
 	if err != nil {
 		t.Fatalf("LookPath: %v", err)
 	}
@@ -55,7 +56,7 @@ func TestLookPathSkipsNonExec(t *testing.T) {
 	if err := os.WriteFile(bin, []byte("not executable"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if _, err := LookPath(testLog(t), "hello", dir); err == nil {
+	if _, err := LookPath(context.Background(), testLog(t), "hello", dir); err == nil {
 		t.Fatalf("LookPath unexpectedly succeeded for non-exec file")
 	}
 }
@@ -67,7 +68,7 @@ func TestLookPathAbsolutePassthrough(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	got, err := LookPath(testLog(t), bin, "/nonexistent")
+	got, err := LookPath(context.Background(), testLog(t), bin, "/nonexistent")
 	if err != nil {
 		t.Fatalf("LookPath: %v", err)
 	}
@@ -77,7 +78,7 @@ func TestLookPathAbsolutePassthrough(t *testing.T) {
 }
 
 func TestLookPathEmptyName(t *testing.T) {
-	if _, err := LookPath(testLog(t), "", "/usr/bin"); err == nil {
+	if _, err := LookPath(context.Background(), testLog(t), "", "/usr/bin"); err == nil {
 		t.Fatalf("LookPath(\"\") expected error")
 	}
 }
@@ -90,7 +91,7 @@ func TestDeriveLocalCommandsBinary(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	got, err := DeriveLocalCommands(testLog(t), bin)
+	got, err := DeriveLocalCommands(context.Background(), testLog(t), bin)
 	if err != nil {
 		t.Fatalf("DeriveLocalCommands: %v", err)
 	}
@@ -106,7 +107,7 @@ func TestDeriveLocalCommandsDirectShebang(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	got, err := DeriveLocalCommands(testLog(t), script)
+	got, err := DeriveLocalCommands(context.Background(), testLog(t), script)
 	if err != nil {
 		t.Fatalf("DeriveLocalCommands: %v", err)
 	}
@@ -123,7 +124,7 @@ func TestDeriveLocalCommandsEnvShebang(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	got, err := DeriveLocalCommands(testLog(t), script)
+	got, err := DeriveLocalCommands(context.Background(), testLog(t), script)
 	if err != nil {
 		t.Fatalf("DeriveLocalCommands: %v", err)
 	}
@@ -140,7 +141,7 @@ func TestDeriveLocalCommandsEnvSplitShebang(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	got, err := DeriveLocalCommands(testLog(t), script)
+	got, err := DeriveLocalCommands(context.Background(), testLog(t), script)
 	if err != nil {
 		t.Fatalf("DeriveLocalCommands: %v", err)
 	}
@@ -157,7 +158,7 @@ func TestDeriveLocalCommandsEnvUnsetSkipsFlagArg(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	got, err := DeriveLocalCommands(testLog(t), script)
+	got, err := DeriveLocalCommands(context.Background(), testLog(t), script)
 	if err != nil {
 		t.Fatalf("DeriveLocalCommands: %v", err)
 	}
@@ -174,7 +175,7 @@ func TestDeriveLocalCommandsExtraWhitespace(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	got, err := DeriveLocalCommands(testLog(t), script)
+	got, err := DeriveLocalCommands(context.Background(), testLog(t), script)
 	if err != nil {
 		t.Fatalf("DeriveLocalCommands: %v", err)
 	}
@@ -191,7 +192,7 @@ func TestDeriveLocalCommandsEmptyFile(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	got, err := DeriveLocalCommands(testLog(t), bin)
+	got, err := DeriveLocalCommands(context.Background(), testLog(t), bin)
 	if err != nil {
 		t.Fatalf("DeriveLocalCommands: %v", err)
 	}
@@ -201,7 +202,7 @@ func TestDeriveLocalCommandsEmptyFile(t *testing.T) {
 }
 
 func TestDeriveLocalCommandsUnreadable(t *testing.T) {
-	got, err := DeriveLocalCommands(testLog(t), "/this/path/does/not/exist")
+	got, err := DeriveLocalCommands(context.Background(), testLog(t), "/this/path/does/not/exist")
 	if err == nil {
 		t.Fatalf("DeriveLocalCommands: expected error")
 	}

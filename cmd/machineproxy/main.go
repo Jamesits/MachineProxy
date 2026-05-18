@@ -78,10 +78,12 @@ func run(rawArgs []string) error {
 		return err
 	}
 
+	ctx := context.Background()
+
 	log := logging.Setup(cfg.LogLevel)
 	log.Debug("config loaded", "path", parsed.cfgPath, "version", config.Version)
 	if cfgJSON, err := json.Marshal(cfg); err == nil {
-		log.Log(context.Background(), logging.LevelTrace, "parsed config", "content", string(cfgJSON))
+		log.Log(ctx, logging.LevelTrace, "parsed config", "content", string(cfgJSON))
 	} else {
 		log.Warn("failed to marshal config for trace log", "error", err)
 	}
@@ -95,7 +97,7 @@ func run(rawArgs []string) error {
 	// even when path_proxy is "prepend" the initial exec must come
 	// from a real local binary.
 	initcmdLog := log.With("component", "initcmd")
-	resolved, err := initcmd.LookPath(initcmdLog, parsed.cmd[0], os.Getenv("PATH"), cfg.Container.PathStubDir)
+	resolved, err := initcmd.LookPath(ctx, initcmdLog, parsed.cmd[0], os.Getenv("PATH"), cfg.Container.PathStubDir)
 	if err != nil {
 		return fmt.Errorf("resolve initial command %q: %w", parsed.cmd[0], err)
 	}
@@ -107,7 +109,7 @@ func run(rawArgs []string) error {
 	// any in-process re-exec land locally instead of being routed to
 	// the remote, where the same path may not exist.
 	if cfg.Container.ForceResolveInitialCommandLocally != nil && *cfg.Container.ForceResolveInitialCommandLocally {
-		derived, derr := initcmd.DeriveLocalCommands(initcmdLog, resolved)
+		derived, derr := initcmd.DeriveLocalCommands(ctx, initcmdLog, resolved)
 		if derr != nil {
 			log.Warn("derive local_commands for initial command", "path", resolved, "error", derr)
 		}
@@ -139,7 +141,7 @@ func run(rawArgs []string) error {
 		Log:       log,
 	})
 
-	return sup.Run(context.Background(), parsed.cmd)
+	return sup.Run(ctx, parsed.cmd)
 }
 
 // cliArgs captures everything parsed off the command line: machineproxy's

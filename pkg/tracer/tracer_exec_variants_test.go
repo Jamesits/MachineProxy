@@ -4,6 +4,7 @@ package tracer
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -40,7 +41,7 @@ func TestTracerCapturesLinuxExecVariants(t *testing.T) {
 				ShimPath: shimPath,
 				Log:      slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
 			})
-			code, err := tr.Start([]string{helperPath, variant, targetPath}, []string{"CAPTURE_LOG=" + logPath}, nil)
+			code, err := tr.Start(context.Background(), []string{helperPath, variant, targetPath}, []string{"CAPTURE_LOG=" + logPath}, nil)
 			if err != nil {
 				t.Fatalf("tracer start: %v", err)
 			}
@@ -78,7 +79,7 @@ func TestTracerWarnsAndLeaksFDExecVariants(t *testing.T) {
 				ShimPath: shimPath,
 				Log:      slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn})),
 			})
-			code, err := tr.Start([]string{helperPath, variant, targetPath}, []string{"CAPTURE_LOG=" + logPath}, nil)
+			code, err := tr.Start(context.Background(), []string{helperPath, variant, targetPath}, []string{"CAPTURE_LOG=" + logPath}, nil)
 			if err != nil {
 				t.Fatalf("tracer start: %v", err)
 			}

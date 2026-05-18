@@ -41,7 +41,7 @@ import (
 // log must be non-nil; the search emits trace-level diagnostics for
 // every PATH entry inspected and for the final hit, so callers can see
 // which $PATH segment served the resolution.
-func LookPath(log *slog.Logger, name, pathEnv string, skipDirs ...string) (string, error) {
+func LookPath(ctx context.Context, log *slog.Logger, name, pathEnv string, skipDirs ...string) (string, error) {
 	if name == "" {
 		return "", &exec.Error{Name: name, Err: exec.ErrNotFound}
 	}
@@ -53,7 +53,7 @@ func LookPath(log *slog.Logger, name, pathEnv string, skipDirs ...string) (strin
 		if err != nil {
 			return "", &exec.Error{Name: name, Err: err}
 		}
-		log.Log(context.Background(), logging.LevelTrace, "LookPath: direct path", "name", name, "resolved", abs)
+		log.Log(ctx, logging.LevelTrace, "LookPath: direct path", "name", name, "resolved", abs)
 		return abs, nil
 	}
 	skip := make(map[string]struct{}, len(skipDirs))
@@ -68,15 +68,15 @@ func LookPath(log *slog.Logger, name, pathEnv string, skipDirs ...string) (strin
 			continue
 		}
 		if _, dropped := skip[filepath.Clean(dir)]; dropped {
-			log.Log(context.Background(), logging.LevelTrace, "LookPath: skipping PATH segment", "name", name, "dir", dir)
+			log.Log(ctx, logging.LevelTrace, "LookPath: skipping PATH segment", "name", name, "dir", dir)
 			continue
 		}
 		candidate := filepath.Join(dir, name)
 		if err := checkExec(candidate); err != nil {
-			log.Log(context.Background(), logging.LevelTrace, "LookPath: miss", "name", name, "dir", dir, "candidate", candidate, "error", err)
+			log.Log(ctx, logging.LevelTrace, "LookPath: miss", "name", name, "dir", dir, "candidate", candidate, "error", err)
 			continue
 		}
-		log.Log(context.Background(), logging.LevelTrace, "LookPath: hit", "name", name, "dir", dir, "resolved", candidate)
+		log.Log(ctx, logging.LevelTrace, "LookPath: hit", "name", name, "dir", dir, "resolved", candidate)
 		return candidate, nil
 	}
 	return "", &exec.Error{Name: name, Err: exec.ErrNotFound}
@@ -115,11 +115,11 @@ func checkExec(path string) error {
 // non-nil; the shebang outcome is recorded at trace level (whether a
 // shebang was found, its interpreter, and whether the env-target branch
 // fired).
-func DeriveLocalCommands(log *slog.Logger, absPath string) ([]string, error) {
+func DeriveLocalCommands(ctx context.Context, log *slog.Logger, absPath string) ([]string, error) {
 	out := []string{absPath}
 	interp, arg, ok, err := readShebang(absPath)
 	if !ok {
-		log.Log(context.Background(), logging.LevelTrace, "DeriveLocalCommands: no shebang", "path", absPath, "error", err)
+		log.Log(ctx, logging.LevelTrace, "DeriveLocalCommands: no shebang", "path", absPath, "error", err)
 		return out, err
 	}
 	if interp != "" {
@@ -127,13 +127,13 @@ func DeriveLocalCommands(log *slog.Logger, absPath string) ([]string, error) {
 	}
 	if filepath.Base(interp) == "env" {
 		if target := envTarget(arg); target != "" {
-			log.Log(context.Background(), logging.LevelTrace, "DeriveLocalCommands: env-target", "path", absPath, "interpreter", interp, "arg", arg, "target", target)
+			log.Log(ctx, logging.LevelTrace, "DeriveLocalCommands: env-target", "path", absPath, "interpreter", interp, "arg", arg, "target", target)
 			out = append(out, target)
 		} else {
-			log.Log(context.Background(), logging.LevelTrace, "DeriveLocalCommands: env shebang without target", "path", absPath, "interpreter", interp, "arg", arg)
+			log.Log(ctx, logging.LevelTrace, "DeriveLocalCommands: env shebang without target", "path", absPath, "interpreter", interp, "arg", arg)
 		}
 	} else {
-		log.Log(context.Background(), logging.LevelTrace, "DeriveLocalCommands: shebang", "path", absPath, "interpreter", interp, "arg", arg)
+		log.Log(ctx, logging.LevelTrace, "DeriveLocalCommands: shebang", "path", absPath, "interpreter", interp, "arg", arg)
 	}
 	return out, err
 }
