@@ -53,9 +53,9 @@ func New(cfg Config) (*Backend, error) {
 	if log == nil {
 		log = slog.Default()
 	}
-	opts := []client.Opt{client.FromEnv, client.WithAPIVersionNegotiation()}
-	if cfg.Host != "" {
-		opts = append(opts, client.WithHost(cfg.Host))
+	opts, err := resolveClientOpts(cfg.Host)
+	if err != nil {
+		return nil, fmt.Errorf("docker context resolution: %w", err)
 	}
 	cli, err := client.NewClientWithOpts(opts...)
 	if err != nil {
