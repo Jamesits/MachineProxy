@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/jamesits/machineproxy/pkg/config"
+	"github.com/jamesits/machineproxy/pkg/initcmd"
 	"github.com/jamesits/machineproxy/pkg/logging"
 	"github.com/jamesits/machineproxy/pkg/supervisor"
 )
@@ -84,12 +85,40 @@ func run(rawArgs []string) error {
 	} else {
 		log.Warn("failed to marshal config for trace log", "error", err)
 	}
-	if len(cfg.Container.LocalCommands) == 0 {
-		log.Debug("container.local_commands is empty; every exec will be forwarded to the remote")
-	}
-
 	if len(parsed.cmd) == 0 {
 		return fmt.Errorf("missing command to run")
+	}
+
+	// Resolve the entrypoint here, outside the container, against the
+	// host PATH minus the path-stub directory. The path-stub serves
+	// FUSE-backed remote ELFs that the local kernel cannot load, so
+	// even when path_proxy is "prepend" the initial exec must come
+	// from a real local binary.
+	initcmdLog := log.With("component", "initcmd")
+	resolved, err := initcmd.LookPath(initcmdLog, parsed.cmd[0], os.Getenv("PATH"), cfg.Container.PathStubDir)
+	if err != nil {
+		return fmt.Errorf("resolve initial command %q: %w", parsed.cmd[0], err)
+	}
+	log.Debug("initial command resolved", "input", parsed.cmd[0], "resolved", resolved)
+	parsed.cmd[0] = resolved
+
+	// Auto-whitelist the entrypoint (plus its shebang chain) so the
+	// tracer lets the kernel's exec-recursion through binfmt_script and
+	// any in-process re-exec land locally instead of being routed to
+	// the remote, where the same path may not exist.
+	if cfg.Container.ForceResolveInitialCommandLocally != nil && *cfg.Container.ForceResolveInitialCommandLocally {
+		derived, derr := initcmd.DeriveLocalCommands(initcmdLog, resolved)
+		if derr != nil {
+			log.Warn("derive local_commands for initial command", "path", resolved, "error", derr)
+		}
+		if len(derived) > 0 {
+			log.Debug("auto-whitelisting initial command", "entries", derived)
+			cfg.Container.LocalCommands = append(cfg.Container.LocalCommands, derived...)
+		}
+	}
+
+	if len(cfg.Container.LocalCommands) == 0 {
+		log.Debug("container.local_commands is empty; every exec will be forwarded to the remote")
 	}
 
 	log.Debug("starting machineproxy", "command", parsed.cmd)

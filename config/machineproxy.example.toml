@@ -50,11 +50,20 @@ env_remove = [
 # transparently runs the corresponding binary on the remote machine.
 # This only affects `PATH` lookup and is intended for shell autocompletion
 # to work correctly; during `exec` the rules in `local_commands` is used.
-#   "prepend"  — stubs win over locally-installed binaries (default)
-#   "append"   — local binaries win; stubs only fill gaps
+# If you explicitly run a program from the path_proxy, the remote executable
+# will be executed.
+#   "prepend"  — stubs win over locally-installed binaries
+#   "append"   — local binaries win; stubs only fill gaps (default)
 #   "disabled" — skip enumeration entirely
-# path_proxy = "prepend"
+# path_proxy = "append"
 
+# Force the entrypoint command to be resolved against the local PATH
+# (skipping the path-stub directory) and auto-append the resolved path,
+# its shebang interpreter, and any `env`-target to local_commands. This
+# keeps the kernel's binfmt_script chain and any in-process re-exec
+# local; the path-stub serves remote ELFs that the local kernel can't
+# load, so this is on by default. Set to false to opt out.
+# force_resolve_initial_command_locally = true
 
 # [agent]
 

@@ -479,8 +479,8 @@ container:
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if cfg.Container.PathProxy != "prepend" {
-		t.Fatalf("expected default path_proxy=prepend, got %q", cfg.Container.PathProxy)
+	if cfg.Container.PathProxy != "append" {
+		t.Fatalf("expected default path_proxy=append, got %q", cfg.Container.PathProxy)
 	}
 }
 

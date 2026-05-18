@@ -100,6 +100,18 @@ type Config struct {
 		// can create the bind target. A leading "~" is expanded against
 		// the local user's home; the resulting path must be absolute.
 		PathStubDir string `yaml:"path_stub_dir" toml:"path_stub_dir" json:"path_stub_dir"`
+		// ForceResolveInitialCommandLocally controls whether the
+		// resolved entrypoint command, its shebang interpreter, and
+		// any env-target are auto-appended to LocalCommands. The
+		// initial exec is always resolved against the local PATH
+		// (the path-stub directory is skipped) because the path-stub
+		// serves remote ELF binaries that cannot be loaded by the
+		// local kernel; whitelisting the resolved chain prevents the
+		// tracer from later routing those same paths to the remote
+		// when they are re-execed (for instance by the kernel's
+		// binfmt_script interpreter). Defaults to true; set false to
+		// opt out.
+		ForceResolveInitialCommandLocally *bool `yaml:"force_resolve_initial_command_locally" toml:"force_resolve_initial_command_locally" json:"force_resolve_initial_command_locally"`
 	} `yaml:"container" toml:"container" json:"container"`
 
 	Agent struct {
@@ -140,10 +152,19 @@ func (c *Config) applyDefaults() error {
 		}
 	}
 	if c.Container.PathProxy == "" {
-		c.Container.PathProxy = "prepend"
+		// Default "append" so locally-installed binaries shadow remote
+		// stubs of the same name. The initial command is always resolved
+		// locally regardless (see cmd/machineproxy main), so the value
+		// only affects PATH lookups performed by the traced process and
+		// its descendants.
+		c.Container.PathProxy = "append"
 	}
 	if c.Container.PathStubDir == "" {
 		c.Container.PathStubDir = defaultPathStubDir()
+	}
+	if c.Container.ForceResolveInitialCommandLocally == nil {
+		t := true
+		c.Container.ForceResolveInitialCommandLocally = &t
 	}
 	// Expand all local-side path fields up front so downstream consumers
 	// only ever see absolute paths. Remote-side fields (AgentRemotePath,
