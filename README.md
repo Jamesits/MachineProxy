@@ -29,11 +29,20 @@ ubuntu@workstation:~/temp$ cat /etc/os-release | grep PRETTY_NAME
 PRETTY_NAME="Rocky Linux 8.10 (Green Obsidian)"
 ```
 
-## Usage
+## Installation
 
 Install [the latest package](https://github.com/Jamesits/MachineProxy/releases/latest) with your package manager of choice.
 
+For Ubuntu or other distros that has unprivileged user namespace disabled:
+
+```shell
+echo "kernel.apparmor_restrict_unprivileged_userns=0" | sudo tee /etc/sysctl.d/80-machineproxy.conf
+sudo sysctl -p /etc/sysctl.d/80-machineproxy.conf
+```
+
 Config `container.local_commands` in `/etc/machineproxy/machineproxy.toml` according to your needs. See the [example config](/config/machineproxy.example.toml) for less common use cases, including environment variable filtering.
+
+## Usage
 
 ### SSH
 
