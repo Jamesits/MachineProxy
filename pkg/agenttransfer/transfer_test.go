@@ -70,5 +70,8 @@ func (f *fakeBackend) Files(context.Context) (remote.FileClient, error) {
 }
 func (f *fakeBackend) KeepAliveInterval() time.Duration    { return 0 }
 func (f *fakeBackend) SendKeepAlive(context.Context) error { return nil }
+func (f *fakeBackend) DetectPlatform(context.Context) (remote.PlatformInfo, error) {
+	return remote.PlatformInfo{}, errors.New("not used")
+}
 
 var _ remote.Backend = (*fakeBackend)(nil)

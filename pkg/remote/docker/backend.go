@@ -177,6 +177,24 @@ func (b *Backend) Files(ctx context.Context) (remote.FileClient, error) {
 	return fcNew, nil
 }
 
+// DetectPlatform implements remote.Backend. Container exec runs on the
+// same kernel as the docker daemon, so the daemon's `info` endpoint
+// (the SDK equivalent of `docker info`) is an accurate source for the
+// container's OS and CPU architecture. Variant is best-effort: only
+// ARM architectures carry one and only when the kernel reports it
+// (e.g. "armv7l").
+func (b *Backend) DetectPlatform(ctx context.Context) (remote.PlatformInfo, error) {
+	info, err := b.cli.Info(ctx)
+	if err != nil {
+		return remote.PlatformInfo{}, fmt.Errorf("docker info: %w", err)
+	}
+	out := platformFromInfo(info.OSType, info.Architecture)
+	if out.OS == "" && out.Arch == "" {
+		return out, fmt.Errorf("docker info did not yield a usable platform (ostype=%q arch=%q)", info.OSType, info.Architecture)
+	}
+	return out, nil
+}
+
 // UploadAgent uploads the mproxy-agent binary to the container at the
 // given path via the docker archive API.
 func (b *Backend) UploadAgent(ctx context.Context, localPath, remotePath string, mode os.FileMode) (string, error) {

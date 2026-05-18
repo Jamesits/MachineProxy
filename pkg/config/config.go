@@ -8,7 +8,6 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 )
 
@@ -88,8 +87,13 @@ type Config struct {
 			Container string `yaml:"container" toml:"container" json:"container"`
 			Host      string `yaml:"host" toml:"host" json:"host"`
 		} `yaml:"docker" toml:"docker" json:"docker"`
-		OS   string `yaml:"os" toml:"os" json:"os"`       // remote OS for agent binary resolution; defaults to runtime.GOOS
-		Arch string `yaml:"arch" toml:"arch" json:"arch"` // remote arch for agent binary resolution; defaults to runtime.GOARCH
+		// OS selects the remote-side agent binary's GOOS. When empty,
+		// the runtime first asks the backend to detect it and only
+		// falls back to the local runtime.GOOS if detection fails.
+		OS string `yaml:"os" toml:"os" json:"os"`
+		// Arch selects the remote-side agent binary's GOARCH. Empty
+		// triggers the same detection/fallback chain as OS.
+		Arch string `yaml:"arch" toml:"arch" json:"arch"`
 	} `yaml:"remote" toml:"remote" json:"remote"`
 
 	Container struct {
@@ -147,12 +151,10 @@ func (c *Config) applyDefaults() error {
 	if c.Remote.Type == "" {
 		c.Remote.Type = "ssh"
 	}
-	if c.Remote.OS == "" {
-		c.Remote.OS = runtime.GOOS
-	}
-	if c.Remote.Arch == "" {
-		c.Remote.Arch = runtime.GOARCH
-	}
+	// Remote.OS and Remote.Arch deliberately stay empty when the user
+	// did not configure them. The runtime layer queries the backend
+	// for the actual platform once the connection is up, and only
+	// falls back to the local GOOS/GOARCH if that detection fails.
 	if c.Components.AgentRemotePath == "" {
 		// "~" is expanded against the remote user's home directory at
 		// upload time (the SFTP server's default working dir).

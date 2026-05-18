@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -129,6 +130,8 @@ func (d *runtimeDeps) StartBackend(ctx context.Context) error {
 	}
 	d.log.Debug("backend connected", "type", d.backend.Type(), "addr", d.backend.Addr())
 
+	d.resolveRemotePlatform(ctx)
+
 	// For backends that need an explicit bootstrap upload before
 	// Files() can return a usable client, do it now. SSH self-hosts
 	// the agent via SFTP, so its UploadAgent is harmless to call
@@ -148,6 +151,56 @@ func (d *runtimeDeps) StartBackend(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// resolveRemotePlatform fills in cfg.Remote.OS/Arch when the user did
+// not pin them via CLI flags or the config file. Each field is handled
+// independently: an operator who configured just the OS still benefits
+// from arch detection, and vice versa. Detection errors are logged at
+// warn level and the field falls back to the local GOOS/GOARCH so the
+// run can still proceed.
+func (d *runtimeDeps) resolveRemotePlatform(ctx context.Context) {
+	if d.cfg.Remote.OS != "" && d.cfg.Remote.Arch != "" {
+		return
+	}
+	info, err := d.backend.DetectPlatform(ctx)
+	if err != nil {
+		d.log.Warn("remote platform detection failed; falling back to local defaults",
+			"error", err,
+			"default_os", runtime.GOOS,
+			"default_arch", runtime.GOARCH,
+		)
+	}
+	if d.cfg.Remote.OS == "" {
+		switch {
+		case info.OS != "":
+			d.cfg.Remote.OS = info.OS
+			d.log.Debug("remote OS detected", "os", info.OS)
+		default:
+			d.cfg.Remote.OS = runtime.GOOS
+			if err == nil {
+				d.log.Warn("remote OS not reported by backend; falling back to local default",
+					"default_os", runtime.GOOS)
+			}
+		}
+	}
+	if d.cfg.Remote.Arch == "" {
+		switch {
+		case info.Arch != "":
+			d.cfg.Remote.Arch = info.Arch
+			if info.Variant != "" {
+				d.log.Debug("remote arch detected", "arch", info.Arch, "variant", info.Variant)
+			} else {
+				d.log.Debug("remote arch detected", "arch", info.Arch)
+			}
+		default:
+			d.cfg.Remote.Arch = runtime.GOARCH
+			if err == nil {
+				d.log.Warn("remote arch not reported by backend; falling back to local default",
+					"default_arch", runtime.GOARCH)
+			}
+		}
+	}
 }
 
 func (d *runtimeDeps) EnterNamespace(ctx context.Context) error {

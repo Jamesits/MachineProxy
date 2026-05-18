@@ -164,6 +164,13 @@ func (c *sshConn) NewSession(context.Context) (Session, error) {
 	return &sshSession{Session: s}, nil
 }
 
+func (c *sshConn) ServerVersion() string {
+	if c.client == nil {
+		return ""
+	}
+	return string(c.client.ServerVersion())
+}
+
 func (c *sshConn) SendKeepAlive(ctx context.Context) error {
 	_ = ctx
 	_, _, err := c.client.SendRequest("keepalive@openssh.com", true, nil)

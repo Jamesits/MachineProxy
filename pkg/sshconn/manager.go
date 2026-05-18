@@ -34,6 +34,10 @@ type Conn interface {
 	NewSFTP(ctx context.Context) (SFTPClient, error)
 	NewSession(ctx context.Context) (Session, error)
 	SendKeepAlive(ctx context.Context) error
+	// ServerVersion returns the SSH identification string the remote sent
+	// during the handshake (e.g. "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.1").
+	// Returns "" when the underlying transport does not surface it.
+	ServerVersion() string
 	Close() error
 }
 

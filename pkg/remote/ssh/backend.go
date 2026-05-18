@@ -150,6 +150,21 @@ func (b *Backend) Files(ctx context.Context) (remote.FileClient, error) {
 	return &sftpFileClient{c: cli}, nil
 }
 
+// DetectPlatform implements remote.Backend. SSH does not have a
+// daemon-side platform query, so detection is limited to whatever
+// hints can be extracted from the server identification string the
+// remote sent during the handshake. Architecture is essentially never
+// advertised in that string; callers are expected to fall back to a
+// local default when this returns an error or an empty arch.
+func (b *Backend) DetectPlatform(ctx context.Context) (remote.PlatformInfo, error) {
+	_ = ctx
+	conn := b.manager.CurrentConn()
+	if conn == nil {
+		return remote.PlatformInfo{}, errors.New("ssh detect: connection not ready")
+	}
+	return parseServerVersion(conn.ServerVersion())
+}
+
 // UploadAgent implements remote.Backend. SSH self-hosts the agent over
 // SFTP, so this delegates to the FileClient's primitives.
 func (b *Backend) UploadAgent(ctx context.Context, localPath, remotePath string, mode os.FileMode) (string, error) {

@@ -18,6 +18,19 @@ const (
 	TypeDocker Type = "docker"
 )
 
+// PlatformInfo describes the remote machine's OS, architecture, and
+// (when meaningful) CPU variant. Field naming follows Go's GOOS/GOARCH
+// convention so values can be plugged into agent-binary path
+// resolution without further translation.
+//
+// Empty fields mean "not detected". Callers must treat each field
+// independently; a backend may know the OS but not the architecture.
+type PlatformInfo struct {
+	OS      string // "linux", "darwin", "windows", "freebsd", ...
+	Arch    string // "amd64", "arm64", "arm", "386", ...
+	Variant string // optional, e.g. "v7" for armv7l
+}
+
 // Backend is a single connection to a remote command-execution +
 // filesystem target. Implementations are expected to be safe for
 // concurrent use after Start returns.
@@ -58,6 +71,13 @@ type Backend interface {
 	// (SSH+SFTP) may delegate; backends that need a bootstrap primitive
 	// (Docker CopyToContainer) implement it directly.
 	UploadAgent(ctx context.Context, localPath, remotePath string, mode os.FileMode) (resolvedRemote string, err error)
+	// DetectPlatform queries the remote for its OS, architecture, and
+	// optional CPU variant. Implementations may leave any field empty
+	// when the backend cannot derive that piece of information; they
+	// should return a non-nil error only when nothing useful could be
+	// determined. Callers are expected to fall back to a sensible
+	// default (typically the local GOOS/GOARCH) on error.
+	DetectPlatform(ctx context.Context) (PlatformInfo, error)
 	// Close terminates the connection and releases resources.
 	Close() error
 }

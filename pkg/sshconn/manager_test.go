@@ -54,4 +54,5 @@ type fakeConn struct{}
 func (f *fakeConn) NewSFTP(context.Context) (SFTPClient, error) { return nil, nil }
 func (f *fakeConn) NewSession(context.Context) (Session, error) { return nil, nil }
 func (f *fakeConn) SendKeepAlive(context.Context) error         { return nil }
+func (f *fakeConn) ServerVersion() string                       { return "" }
 func (f *fakeConn) Close() error                                { return nil }
