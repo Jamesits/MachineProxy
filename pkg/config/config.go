@@ -3,6 +3,8 @@ package config
 import (
 	"errors"
 	"fmt"
+	"log/slog"
+	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -71,6 +73,12 @@ type Config struct {
 		//   "append"   — local binaries win; stubs only fill gaps
 		//   "disabled" — skip enumeration entirely
 		PathProxy string `yaml:"path_proxy" toml:"path_proxy" json:"path_proxy"`
+		// PathStubDir is the in-container directory where the stub FUSE
+		// is bind-mounted. Defaults to $HOME/.cache/machineproxy/pathstub
+		// so bwrap (which lacks privilege to mkdir parents under /var)
+		// can create the bind target. A leading "~" is expanded against
+		// the local user's home; the resulting path must be absolute.
+		PathStubDir string `yaml:"path_stub_dir" toml:"path_stub_dir" json:"path_stub_dir"`
 	} `yaml:"container" toml:"container" json:"container"`
 
 	Agent struct {
@@ -101,7 +109,9 @@ func (c *Config) applyDefaults() error {
 		c.Remote.Arch = runtime.GOARCH
 	}
 	if c.Components.AgentRemotePath == "" {
-		c.Components.AgentRemotePath = "/tmp/mproxy-agent"
+		// "~" is expanded against the remote user's home directory at
+		// upload time (the SFTP server's default working dir).
+		c.Components.AgentRemotePath = "~/.cache/machineproxy/mproxy-agent"
 	}
 	if len(c.Container.EnvRemove) == 0 {
 		c.Container.EnvRemove = []string{
@@ -110,6 +120,14 @@ func (c *Config) applyDefaults() error {
 	}
 	if c.Container.PathProxy == "" {
 		c.Container.PathProxy = "prepend"
+	}
+	if c.Container.PathStubDir == "" {
+		c.Container.PathStubDir = defaultPathStubDir()
+	}
+	if expanded, err := expandLocalHome(c.Container.PathStubDir); err == nil {
+		c.Container.PathStubDir = expanded
+	} else {
+		return fmt.Errorf("container.path_stub_dir: %w", err)
 	}
 	if len(c.Agent.EnvKeep) == 0 {
 		c.Agent.EnvKeep = []string{
@@ -174,7 +192,46 @@ func (c *Config) Validate() error {
 	default:
 		return fmt.Errorf("container.path_proxy must be one of prepend, append, disabled; got %q", c.Container.PathProxy)
 	}
+	if !filepath.IsAbs(c.Container.PathStubDir) {
+		return fmt.Errorf("container.path_stub_dir must be absolute; got %q", c.Container.PathStubDir)
+	}
 	return nil
+}
+
+// defaultPathStubDir returns the home-relative default for the
+// PATH-stub mount point. If the local home directory cannot be
+// determined we emit a warning and fall back to a /tmp path so bwrap
+// can still mkdir the bind target.
+func defaultPathStubDir() string {
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return filepath.Join(home, ".cache", "machineproxy", "pathstub")
+	} else {
+		slog.Default().Warn(
+			"could not determine local home directory; falling back to /tmp for path-stub mount",
+			"error", err,
+		)
+	}
+	return "/tmp/machineproxy/pathstub"
+}
+
+// expandLocalHome resolves a leading "~" or "~/" against the local
+// user's home directory. Other paths are returned unchanged. Returns
+// an error only if "~" is used but the home dir cannot be looked up.
+func expandLocalHome(p string) (string, error) {
+	if p != "~" && !strings.HasPrefix(p, "~/") {
+		return p, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("expand ~: %w", err)
+	}
+	if home == "" {
+		return "", errors.New("expand ~: home directory is empty")
+	}
+	if p == "~" {
+		return home, nil
+	}
+	return filepath.Join(home, p[2:]), nil
 }
 
 // LocalCommandRule is a compiled local_commands entry that can match

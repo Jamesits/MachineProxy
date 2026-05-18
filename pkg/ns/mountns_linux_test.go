@@ -104,7 +104,7 @@ func TestCommandIncludesAllBinds(t *testing.T) {
 	n := &Namespace{bwrapBin: "/usr/bin/bwrap"}
 	_, args := n.Command("/workspace", []string{"echo", "hi"}, []Bind{
 		{Src: "/tmp/fuse-ws", Dst: "/workspace"},
-		{Src: "/tmp/fuse-stubs", Dst: "/var/lib/machineproxy/path-stub"},
+		{Src: "/tmp/fuse-stubs", Dst: "/home/user/.cache/machineproxy/pathstub"},
 	})
 
 	// Walk pairs of "--bind src dst" entries and confirm both binds appear.
@@ -117,7 +117,7 @@ func TestCommandIncludesAllBinds(t *testing.T) {
 	if have["/tmp/fuse-ws"] != "/workspace" {
 		t.Errorf("workspace bind missing: %v", have)
 	}
-	if have["/tmp/fuse-stubs"] != "/var/lib/machineproxy/path-stub" {
+	if have["/tmp/fuse-stubs"] != "/home/user/.cache/machineproxy/pathstub" {
 		t.Errorf("stub bind missing: %v", have)
 	}
 

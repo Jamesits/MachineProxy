@@ -7,6 +7,8 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path"
+	"strings"
 	"sync"
 
 	"github.com/jamesits/machineproxy/pkg/logging"
@@ -20,6 +22,8 @@ type remoteFileClient interface {
 	Open(path string) (io.ReadCloser, error)
 	OpenFile(path string, flags int) (io.WriteCloser, error)
 	Chmod(path string, mode os.FileMode) error
+	MkdirAll(path string) error
+	Getwd() (string, error)
 }
 
 type sftpRemoteClient struct {
@@ -36,6 +40,14 @@ func (c sftpRemoteClient) OpenFile(path string, flags int) (io.WriteCloser, erro
 
 func (c sftpRemoteClient) Chmod(path string, mode os.FileMode) error {
 	return c.client.Chmod(path, mode)
+}
+
+func (c sftpRemoteClient) MkdirAll(path string) error {
+	return c.client.MkdirAll(path)
+}
+
+func (c sftpRemoteClient) Getwd() (string, error) {
+	return c.client.Getwd()
 }
 
 // Transferer uploads the agent binary to the remote host and caches
@@ -97,6 +109,16 @@ func (t *Transferer) Ensure() (string, error) {
 		return "", err
 	}
 
+	// Expand a leading "~/" against the SFTP server's working directory
+	// (typically the remote user's home). SFTP itself does not expand ~,
+	// and the resolved absolute path is also what gets passed to
+	// session.Start, which single-quotes its argument.
+	resolved, err := expandRemoteHome(client, t.remotePath)
+	if err != nil {
+		return "", fmt.Errorf("expand remote agent path %q: %w", t.remotePath, err)
+	}
+	t.remotePath = resolved
+
 	// Check the remote binary itself. A sidecar hash marker in /tmp is not a
 	// trust boundary because other remote users may be able to write it.
 	// This still creates a TOCTOU possibility though.
@@ -112,6 +134,14 @@ func (t *Transferer) Ensure() (string, error) {
 		return t.remotePath, nil
 	}
 
+	// Ensure the parent directory exists before the upload. Required for
+	// the default ~/.cache/machineproxy/ location on fresh remote hosts.
+	if parent := path.Dir(t.remotePath); parent != "" && parent != "." && parent != "/" {
+		if mkErr := client.MkdirAll(parent); mkErr != nil {
+			return "", fmt.Errorf("create remote dir %q: %w", parent, mkErr)
+		}
+	}
+
 	// Upload the binary.
 	t.log.Debug("uploading agent binary", "local", t.localPath, "remote", t.remotePath)
 	if err := uploadFile(client, t.localPath, t.remotePath, 0o755); err != nil {
@@ -121,6 +151,25 @@ func (t *Transferer) Ensure() (string, error) {
 	t.transferred = true
 	t.log.Debug("agent binary transferred", "remote", t.remotePath, "hash", hash[:12])
 	return t.remotePath, nil
+}
+
+// expandRemoteHome resolves a leading "~" or "~/" against the SFTP
+// server's working directory. Other paths are returned unchanged.
+func expandRemoteHome(client remoteFileClient, p string) (string, error) {
+	if p != "~" && !strings.HasPrefix(p, "~/") {
+		return p, nil
+	}
+	home, err := client.Getwd()
+	if err != nil {
+		return "", err
+	}
+	if home == "" {
+		return "", fmt.Errorf("remote home directory unknown")
+	}
+	if p == "~" {
+		return home, nil
+	}
+	return path.Join(home, p[2:]), nil
 }
 
 func (t *Transferer) remoteClient() (remoteFileClient, error) {

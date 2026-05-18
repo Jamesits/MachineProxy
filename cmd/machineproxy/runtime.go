@@ -289,7 +289,7 @@ func (d *runtimeDeps) BuildPathStubs(ctx context.Context) error {
 	// tracer would whitelist the stub and try to run a remote ELF as a
 	// local binary, which is rarely what the user wants.
 	totalEntries := len(entries)
-	filtered := pathstub.FilterLocalCommands(entries, d.cfg.Container.LocalCommands)
+	filtered := pathstub.FilterLocalCommands(entries, d.cfg.Container.LocalCommands, d.cfg.Container.PathStubDir)
 	if skipped := totalEntries - len(filtered); skipped > 0 {
 		d.log.Debug("path stubs shadowed by local_commands", "skipped", skipped)
 	}
@@ -412,7 +412,7 @@ func (d *runtimeDeps) StartBroker(ctx context.Context) error {
 	mount, _ := config.ParseMount(d.cfg.Container.Mounts[0])
 	containerPrefix := mount.ContainerPath
 	remotePrefix := mount.RemotePath
-	stubPrefix := pathstub.ContainerMountPath
+	stubPrefix := d.cfg.Container.PathStubDir
 	stubMap := d.stubEntries // nil when path proxy is disabled or empty
 
 	hasWorkspaceRewrite := containerPrefix != remotePrefix
@@ -527,7 +527,7 @@ func (d *runtimeDeps) RunChild(ctx context.Context, cmdline []string) error {
 	pathInj := ns.PathInjection{}
 	if d.pathStubMountDir != "" {
 		pathInj = ns.PathInjection{
-			Dir:      pathstub.ContainerMountPath,
+			Dir:      d.cfg.Container.PathStubDir,
 			Position: d.cfg.Container.PathProxy,
 		}
 	}
@@ -552,7 +552,7 @@ func (d *runtimeDeps) RunChild(ctx context.Context, cmdline []string) error {
 
 	binds := []ns.Bind{{Src: d.fuseMountDir, Dst: mount.ContainerPath}}
 	if d.pathStubMountDir != "" {
-		binds = append(binds, ns.Bind{Src: d.pathStubMountDir, Dst: pathstub.ContainerMountPath})
+		binds = append(binds, ns.Bind{Src: d.pathStubMountDir, Dst: d.cfg.Container.PathStubDir})
 	}
 
 	// Wrap the command in the ptrace-based tracer so exec interception

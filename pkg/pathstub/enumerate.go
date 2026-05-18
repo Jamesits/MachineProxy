@@ -14,11 +14,6 @@ import (
 	"github.com/jamesits/machineproxy/pkg/config"
 )
 
-// ContainerMountPath is the in-container directory where the stub FUSE
-// is bind-mounted. Kept constant so the broker's path mapper and the
-// PATH-injection code agree on the prefix.
-const ContainerMountPath = "/var/lib/machineproxy/path-stub"
-
 // EnumerateLocally walks the listed PATH-style directories and returns
 // one entry per executable file. If paths is empty, the agent's own
 // $PATH is used (split on ":"). Within each directory entries are
@@ -85,9 +80,10 @@ func splitPath(p string) []string {
 }
 
 // FilterLocalCommands removes entries whose synthesised stub path
-// (ContainerMountPath/<name>) would be matched by any rule in
-// localCommands. This prevents the tracer from shadowing a binary the
-// user explicitly opted to run locally with a remote-routing stub.
+// (mountPath/<name>) would be matched by any rule in localCommands.
+// This prevents the tracer from shadowing a binary the user explicitly
+// opted to run locally with a remote-routing stub. mountPath is the
+// configured container-side directory where the stub FUSE is bind-mounted.
 //
 // Rule-by-rule behaviour (mirrors config.LocalCommandRule.Match):
 //   - basename rule (e.g. "env")          → filters out the matching stub.
@@ -95,13 +91,12 @@ func splitPath(p string) []string {
 //     synthetic path; rules anchored to "^/" or that include directory
 //     components will not match.
 //   - absolute rule (e.g. "/usr/bin/env") → never filters, because the
-//     stub's pathname is /var/lib/machineproxy/path-stub/<name>, not
-//     /usr/bin/<name>. Use a basename rule if you want stub-level
-//     shadowing.
+//     stub's pathname is <mountPath>/<name>, not /usr/bin/<name>. Use a
+//     basename rule if you want stub-level shadowing.
 //
 // Invalid rules are silently skipped (the loader has already validated
 // them; this is a defence-in-depth pass).
-func FilterLocalCommands(entries []agentproto.PathInfoEntry, localCommands []string) []agentproto.PathInfoEntry {
+func FilterLocalCommands(entries []agentproto.PathInfoEntry, localCommands []string, mountPath string) []agentproto.PathInfoEntry {
 	if len(localCommands) == 0 {
 		return entries
 	}
@@ -119,7 +114,7 @@ func FilterLocalCommands(entries []agentproto.PathInfoEntry, localCommands []str
 
 	out := entries[:0]
 	for _, e := range entries {
-		pseudo := ContainerMountPath + "/" + e.Name
+		pseudo := mountPath + "/" + e.Name
 		shadowed := false
 		for _, r := range rules {
 			if r.Match(pseudo) {

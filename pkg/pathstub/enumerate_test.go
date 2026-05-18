@@ -94,6 +94,7 @@ func TestEnumerateLocallyEmptyPathFromEnv(t *testing.T) {
 }
 
 func TestFilterLocalCommands(t *testing.T) {
+	const mountPath = "/home/user/.cache/machineproxy/pathstub"
 	entries := []agentproto.PathInfoEntry{
 		{Name: "env", RemotePath: "/usr/bin/env"},
 		{Name: "python3", RemotePath: "/usr/bin/python3"},
@@ -129,8 +130,8 @@ func TestFilterLocalCommands(t *testing.T) {
 		{
 			name: "absolute-path rule does NOT shadow stubs",
 			// /usr/bin/env is precise: only the literal local /usr/bin/env
-			// runs locally. The stub at /var/lib/machineproxy/path-stub/env
-			// is a different path and stays.
+			// runs locally. The stub at <mountPath>/env is a different
+			// path and stays.
 			localCommands: []string{"/usr/bin/env"},
 			wantNames:     []string{"env", "python3", "bash", "node"},
 		},
@@ -154,7 +155,7 @@ func TestFilterLocalCommands(t *testing.T) {
 			in := make([]agentproto.PathInfoEntry, len(entries))
 			copy(in, entries)
 
-			out := FilterLocalCommands(in, tc.localCommands)
+			out := FilterLocalCommands(in, tc.localCommands, mountPath)
 			got := make([]string, len(out))
 			for i, e := range out {
 				got[i] = e.Name

@@ -33,6 +33,41 @@ func TestEnsureDoesNotTrustHashMarkerWhenRemoteBinaryDiffers(t *testing.T) {
 	}
 }
 
+func TestEnsureExpandsTildeAgainstRemoteHome(t *testing.T) {
+	local := filepath.Join(t.TempDir(), "mproxy-agent")
+	if err := os.WriteFile(local, []byte("agent-bytes"), 0o755); err != nil {
+		t.Fatalf("write local agent: %v", err)
+	}
+
+	remote := newFakeRemoteFiles()
+	transferer := newWithRemoteClient(remote, local, "~/.cache/machineproxy/mproxy-agent",
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	got, err := transferer.Ensure()
+	if err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+
+	want := "/home/fake/.cache/machineproxy/mproxy-agent"
+	if got != want {
+		t.Fatalf("returned remote path = %q, want %q", got, want)
+	}
+	if _, ok := remote.files[want]; !ok {
+		t.Fatalf("agent not uploaded to expanded path %q (have %v)", want, remote.files)
+	}
+}
+
+func TestExpandRemoteHomeLeavesAbsolutePathsAlone(t *testing.T) {
+	remote := newFakeRemoteFiles()
+	got, err := expandRemoteHome(remote, "/tmp/mproxy-agent")
+	if err != nil {
+		t.Fatalf("expandRemoteHome: %v", err)
+	}
+	if got != "/tmp/mproxy-agent" {
+		t.Fatalf("got %q, want unchanged", got)
+	}
+}
+
 type fakeRemoteFiles struct {
 	files map[string][]byte
 	modes map[string]os.FileMode
@@ -61,6 +96,10 @@ func (f *fakeRemoteFiles) Chmod(path string, mode os.FileMode) error {
 	f.modes[path] = mode
 	return nil
 }
+
+func (f *fakeRemoteFiles) MkdirAll(string) error { return nil }
+
+func (f *fakeRemoteFiles) Getwd() (string, error) { return "/home/fake", nil }
 
 type fakeWriteFile struct {
 	remote *fakeRemoteFiles
