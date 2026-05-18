@@ -21,10 +21,26 @@ const (
 	FormatTOML
 )
 
-// LoadFile reads and decodes the config at path. Format is detected by
-// file extension first (.yaml/.yml/.json → YAML, .toml → TOML); if the
-// extension is unrecognized, the contents are sniffed (see detectFormat).
+// LoadFile reads and decodes the config at path, applies defaults, and
+// validates. Format is detected by file extension first
+// (.yaml/.yml/.json → YAML, .toml → TOML); if the extension is
+// unrecognized, the contents are sniffed (see detectFormat).
 func LoadFile(path string) (*Config, error) {
+	cfg, err := LoadFileRaw(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := cfg.Finalize(); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+// LoadFileRaw reads and decodes the config at path without applying
+// defaults or validating. Callers that need to mutate the result before
+// use (for instance, applying CLI overrides) should call Finalize after
+// their mutations. Format detection matches LoadFile.
+func LoadFileRaw(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read config %q: %w", path, err)
@@ -33,20 +49,38 @@ func LoadFile(path string) (*Config, error) {
 	if !ok {
 		format = detectFormat(data)
 	}
-	return decodeAndValidate(data, format)
+	return decode(data, format)
 }
 
-// Load reads from r, auto-detecting YAML vs TOML by sniffing the bytes.
-// Use LoadFile when you have a path so the extension hint applies first.
+// Load reads from r, auto-detecting YAML vs TOML by sniffing the bytes,
+// and applies defaults plus validation. Use LoadFile when you have a
+// path so the extension hint applies first.
 func Load(r io.Reader) (*Config, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
-	return decodeAndValidate(data, detectFormat(data))
+	cfg, err := decode(data, detectFormat(data))
+	if err != nil {
+		return nil, err
+	}
+	if err := cfg.Finalize(); err != nil {
+		return nil, err
+	}
+	return cfg, nil
 }
 
-func decodeAndValidate(data []byte, format Format) (*Config, error) {
+// Finalize applies defaults and validates the config. Call this after
+// decoding (via LoadFileRaw) and any post-decode mutations such as CLI
+// overrides. LoadFile and Load call Finalize automatically.
+func (c *Config) Finalize() error {
+	if err := c.applyDefaults(); err != nil {
+		return err
+	}
+	return c.Validate()
+}
+
+func decode(data []byte, format Format) (*Config, error) {
 	var cfg Config
 	switch format {
 	case FormatTOML:
@@ -61,12 +95,6 @@ func decodeAndValidate(data []byte, format Format) (*Config, error) {
 		if err := dec.Decode(&cfg); err != nil {
 			return nil, fmt.Errorf("decode yaml config: %w", err)
 		}
-	}
-	if err := cfg.applyDefaults(); err != nil {
-		return nil, err
-	}
-	if err := cfg.Validate(); err != nil {
-		return nil, err
 	}
 	return &cfg, nil
 }

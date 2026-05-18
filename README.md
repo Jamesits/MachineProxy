@@ -12,49 +12,13 @@ It solves the last-hop problem for your AI agent, even when the target machine i
 
 Install [the latest package](https://github.com/Jamesits/MachineProxy/releases/latest) with your package manager of choice.
 
-Write a config file for your workspace:
-
-```toml
-log_level = "error"
-
-[remote]
-# arch = "amd64" # or arm64, defaults to the local machine's architecture
-
-[remote.ssh]
-# Replace with your SSH hostname or IP
-# Supports reading host definitions in your SSH config
-host = "192.0.2.2"
-# user = "" # optional
-
-[container]
-# A list of programs that you want to run locally (or that you cannot install on the remote device)
-local_commands = [
-    "amp",
-    "codex",
-    "claude",
-    "node",
-    "opencode",
-    "qpdf",
-    "rtk",
-    "rg",
-]
-# A list of remote paths that you want the programs to access
-# The first entry becomes the working directory of the launched process
-mounts = [
-    "/path/to/your/workspace",
-]
-# filter environment variables that the remote device does not need
-env_remove = [
-    "AMP_*",
-    "ANTHROPIC_*",
-    "VSCODE_*",
-]
-```
+Create an empty directory on your local workstation at the same path as the remote workspace. If you can't, use `-v "$(pwd):/path/to/remote/workspace"` to map a different local path.
 
 Then run it:
 
 ```shell
-machineproxy --config <./config.toml> -- <program>
+cd /path/to/your/workspace/root
+machineproxy [-p port] [[user@]hostname] -- <program>
 ```
 
 See the [example config](/config/machineproxy.example.toml) for less common use cases, including environment variable filtering.
@@ -91,9 +55,9 @@ This program aims to work around these problems.
 MachineProxy pros:
 
 - `@file` works
-- All native tools (read/write files, searching, executing programs or shell commands, etc.) works
+- All native tools (read/write files, searching, executing programs or shell commands, etc.) work
 - Harness-local file/code indexing works
-- Local executables can call remote executables, and they can pipe data in between
+- Local executables can call remote executables, and they can pipe data between each other
 
 "Just use SSH" pros:
 
@@ -106,7 +70,7 @@ The program is launched with a quasi-remote environment.
 - The workspace is mounted with FUSE over SFTP
 - Child processes are intercepted and launched over SSH
 
-### Compatibility, or how good is it
+### Compatibility, or how good it is
 
 MachineProxy supports Linux only, for both local and remote devices. Golang runtime requires Linux 3.2 or later; [support differs on different architectures](https://go.dev/wiki/MinimumRequirements#linuxlinux).
 
@@ -122,7 +86,7 @@ DO NOT treat MachineProxy as a security barrier. Programs launched by MachinePro
 
 ### Mounts
 
-- DO NOT mount over your local home directory, otherwise your AI agents might not be able to read its config.
+- DO NOT mount over your local home directory, otherwise your AI agents might not be able to read their config.
 
 ### Environment Variables Filtering
 
@@ -133,5 +97,5 @@ DO NOT treat MachineProxy as a security barrier. Programs launched by MachinePro
 VSCode Terminal seems to override `/usr/bin/env node` in some cases, causing some programs, such as [Amp](https://ampcode.com), to fail to launch. If you are using MachineProxy from a VSCode Terminal, run Node.js programs like this, using `amp` as an example:
 
 ```shell
-machineproxy [...args] /usr/bin/node "$(which amp)" --no-ide
+machineproxy [other args] /usr/bin/node "$(which amp)" --no-ide
 ```

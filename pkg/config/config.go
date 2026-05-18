@@ -132,7 +132,7 @@ func (c *Config) applyDefaults() error {
 	if c.Components.AgentRemotePath == "" {
 		// "~" is expanded against the remote user's home directory at
 		// upload time (the SFTP server's default working dir).
-		c.Components.AgentRemotePath = "~/.cache/machineproxy/mproxy-agent"
+		c.Components.AgentRemotePath = DefaultAgentRemotePath
 	}
 	if len(c.Container.EnvRemove) == 0 {
 		c.Container.EnvRemove = []string{
@@ -238,20 +238,21 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// defaultPathStubDir returns the home-relative default for the
-// PATH-stub mount point. If the local home directory cannot be
-// determined we emit a warning and fall back to a /tmp path so bwrap
-// can still mkdir the bind target.
+// defaultPathStubDir returns the resolved default for the PATH-stub
+// mount point. DefaultPathStubDir is expanded against the local user's
+// home; if that lookup fails we emit a warning and fall back to
+// DefaultPathStubFallbackDir so bwrap can still mkdir the bind target.
 func defaultPathStubDir() string {
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		return filepath.Join(home, ".cache", "machineproxy", "pathstub")
-	} else {
-		slog.Default().Warn(
-			"could not determine local home directory; falling back to /tmp for path-stub mount",
-			"error", err,
-		)
+	expanded, err := ExpandLocalHome(DefaultPathStubDir)
+	if err == nil {
+		return expanded
 	}
-	return "/tmp/machineproxy/pathstub"
+	slog.Default().Warn(
+		"could not determine local home directory; using path-stub fallback",
+		"error", err,
+		"fallback", DefaultPathStubFallbackDir,
+	)
+	return DefaultPathStubFallbackDir
 }
 
 // ExpandLocalHome resolves a leading "~" or "~/" against the local

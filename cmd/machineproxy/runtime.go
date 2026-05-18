@@ -568,6 +568,7 @@ func (d *runtimeDeps) RunChild(ctx context.Context, cmdline []string) error {
 	workingDir := d.cfg.Container.WorkingDir
 	if workingDir == "" {
 		workingDir = mount.ContainerPath
+		d.log.Info("container working_dir not set; defaulting to first mount", "working_dir", workingDir)
 	}
 
 	binds := []ns.Bind{{Src: d.fuseMountDir, Dst: mount.ContainerPath}}

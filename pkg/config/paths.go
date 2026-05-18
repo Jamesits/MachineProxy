@@ -6,8 +6,31 @@ import (
 	"path/filepath"
 )
 
-// LibDir is the standard install location for machineproxy support binaries.
-const LibDir = "/usr/lib/machineproxy"
+// Packager-overridable path defaults. These are var (not const) so a
+// downstream packager can repoint them at build time via, e.g.:
+//
+//	go build -ldflags "-X github.com/jamesits/machineproxy/pkg/config.LibDir=/opt/machineproxy/lib"
+var (
+	// LibDir is the install location for machineproxy support binaries
+	// (mproxy-shim, mproxy-tracer, and the per-OS/arch agent layout
+	// under <LibDir>/agent/<goos>/<goarch>/).
+	LibDir = "/usr/lib/machineproxy"
+
+	// DefaultAgentRemotePath is the upload destination for mproxy-agent
+	// on the remote host. A leading "~" is expanded against the remote
+	// user's home directory at SFTP-use time.
+	DefaultAgentRemotePath = "~/.cache/machineproxy/mproxy-agent"
+
+	// DefaultPathStubDir is the local bind target for the PATH-stub
+	// FUSE mount. A leading "~" is expanded against the local user's
+	// home directory when the config is finalized; if home-directory
+	// lookup fails, DefaultPathStubFallbackDir is used instead.
+	DefaultPathStubDir = "~/.cache/machineproxy/pathstub"
+
+	// DefaultPathStubFallbackDir is the absolute path used in place of
+	// DefaultPathStubDir when the local home directory is unavailable.
+	DefaultPathStubFallbackDir = "/tmp/machineproxy/pathstub"
+)
 
 // ResolveShimPath finds the mproxy-shim binary using the config value,
 // then falling back to adjacent binary and well-known install paths.

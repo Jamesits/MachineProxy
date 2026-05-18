@@ -1,0 +1,23 @@
+# This default config covers common usages only.
+# See /usr/share/doc/machineproxy/examples/machineproxy.example.toml for a full config.
+
+log_level = "error"
+
+[container]
+# A list of programs that you want to run locally (or that you cannot install on the remote device)
+local_commands = [
+    "amp",
+    "codex",
+    "claude",
+    "node",
+    "opencode",
+    "qpdf",
+    "rtk",
+    "rg",
+]
+# filter environment variables that the remote device does not need
+env_remove = [
+    "AMP_*",
+    "ANTHROPIC_*",
+    "VSCODE_*",
+]

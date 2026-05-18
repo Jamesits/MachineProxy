@@ -99,6 +99,9 @@ nfpms:
         dst: /usr/lib/machineproxy/mproxy-tracer
       - src: config/machineproxy.example.toml
         dst: /usr/share/doc/machineproxy/examples/machineproxy.example.toml
+      - src: config/machineproxy.default.toml
+        dst: /etc/machineproxy/machineproxy.toml
+        type: "config|noreplace"
 
 checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
