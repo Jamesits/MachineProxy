@@ -1,5 +1,7 @@
 # Log verbosity: trace, debug, info, warn, error
 log_level = "info"
+# Log destination: omit or leave empty to write to stderr; set to a file path to append there instead.
+# log_file = "/var/log/machineproxy.log"
 
 [remote]
 # Backend selector: "ssh" (default), "docker", or "compose". The CLI

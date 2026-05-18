@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -117,7 +118,12 @@ func run(rawArgs []string) error {
 
 	ctx := context.Background()
 
-	log := logging.Setup(cfg.LogLevel)
+	logWriter, logCloser, err := openLogWriter(cfg.LogFile)
+	if err != nil {
+		return fmt.Errorf("open log_file %q: %w", cfg.LogFile, err)
+	}
+	defer logCloser()
+	log := logging.Setup(cfg.LogLevel, logWriter)
 	log.Debug("config loaded", "path", parsed.cfgPath, "version", config.Version)
 	if cfgJSON, err := json.Marshal(cfg); err == nil {
 		log.Log(ctx, logging.LevelTrace, "parsed config", "content", string(cfgJSON))
@@ -170,6 +176,19 @@ func run(rawArgs []string) error {
 	})
 
 	return sup.Run(ctx, parsed.cmd)
+}
+
+// openLogWriter returns a writer for log output and a closer to call on exit.
+// When path is empty the writer is os.Stderr and the closer is a no-op.
+func openLogWriter(path string) (io.Writer, func(), error) {
+	if path == "" {
+		return os.Stderr, func() {}, nil
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return nil, nil, err
+	}
+	return f, func() { _ = f.Close() }, nil
 }
 
 // cliArgs captures everything parsed off the command line: machineproxy's

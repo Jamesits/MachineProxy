@@ -1,8 +1,8 @@
 package logging
 
 import (
+	"io"
 	"log/slog"
-	"os"
 	"strings"
 )
 
@@ -26,11 +26,11 @@ func ParseLevel(s string) slog.Level {
 	}
 }
 
-// Setup creates and registers a default slog.Logger writing to stderr
-// at the given level. It replaces the custom "TRACE" level name in output.
-func Setup(level string) *slog.Logger {
+// Setup creates and registers a default slog.Logger writing to w at the
+// given level. It replaces the custom "TRACE" level name in output.
+func Setup(level string, w io.Writer) *slog.Logger {
 	lvl := ParseLevel(level)
-	h := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+	h := slog.NewTextHandler(w, &slog.HandlerOptions{
 		Level: lvl,
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
 			if a.Key == slog.LevelKey {

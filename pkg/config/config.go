@@ -67,6 +67,7 @@ func isAbsOrHomeRelative(p string) bool {
 // Config describes machineproxy runtime behavior.
 type Config struct {
 	LogLevel string `yaml:"log_level" toml:"log_level" json:"log_level"` // trace, debug, info, warn, error
+	LogFile  string `yaml:"log_file"  toml:"log_file"  json:"log_file"`  // empty = stderr
 
 	Remote struct {
 		// Type selects the backend implementation: "ssh" (default) or
@@ -199,6 +200,7 @@ func (c *Config) applyDefaults() error {
 		name string
 		ptr  *string
 	}{
+		{"log_file", &c.LogFile},
 		{"container.path_stub_dir", &c.Container.PathStubDir},
 		{"container.working_dir", &c.Container.WorkingDir},
 		{"components.shim_path", &c.Components.ShimPath},

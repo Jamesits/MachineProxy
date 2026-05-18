@@ -2,6 +2,7 @@
 # See /usr/share/doc/machineproxy/examples/machineproxy.example.toml for a full config.
 
 log_level = "error"
+log_file = "" # empty means stderr
 
 [container]
 # A list of programs that you want to run locally (or that you cannot install on the remote device)

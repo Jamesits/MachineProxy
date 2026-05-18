@@ -21,7 +21,7 @@ func main() {
 
 	ctx := context.Background()
 
-	log := logging.Setup(logLevel)
+	log := logging.Setup(logLevel, os.Stderr)
 	cfg.Log = log
 
 	t := tracer.New(*cfg)
