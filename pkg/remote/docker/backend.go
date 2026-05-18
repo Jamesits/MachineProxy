@@ -18,6 +18,7 @@ import (
 
 	"github.com/docker/docker/client"
 
+	"github.com/jamesits/machineproxy/pkg/logging"
 	"github.com/jamesits/machineproxy/pkg/remote"
 )
 
@@ -61,6 +62,10 @@ func New(cfg Config) (*Backend, error) {
 	if err != nil {
 		return nil, fmt.Errorf("docker client: %w", err)
 	}
+	log.Log(nil, logging.LevelTrace, "docker client resolved",
+		"host", cli.DaemonHost(),
+		"api_version", cli.ClientVersion(),
+	)
 	return &Backend{cfg: cfg, cli: cli, log: log}, nil
 }
 
