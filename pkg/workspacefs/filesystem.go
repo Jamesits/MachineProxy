@@ -11,39 +11,18 @@ import (
 	"syscall"
 
 	"github.com/jamesits/machineproxy/pkg/logging"
+	"github.com/jamesits/machineproxy/pkg/remote"
 )
 
-type RemoteFile interface {
-	ReadAt(p []byte, off int64) (int, error)
-	Close() error
-}
-
-type RemoteWriteFile interface {
-	WriteAt(p []byte, off int64) (int, error)
-	Close() error
-}
-
-// SFTPClient is the subset of pkg/sftp client methods required by the filesystem.
-type SFTPClient interface {
-	Open(path string) (RemoteFile, error)
-	Create(path string) (RemoteWriteFile, error)
-	OpenFile(path string, flags int) (RemoteWriteFile, error)
-	Stat(path string) (os.FileInfo, error)
-	ReadDir(path string) ([]os.FileInfo, error)
-	Mkdir(path string) error
-	Remove(path string) error
-	Rename(oldpath, newpath string) error
-	Chmod(path string, mode os.FileMode) error
-	Truncate(path string, size int64) error
-}
-
+// FileSystem backs a FUSE mount with a remote.FileClient. Each op is
+// translated into the corresponding FileClient method call.
 type FileSystem struct {
 	root string
-	sftp SFTPClient
+	sftp remote.FileClient
 	log  *slog.Logger
 }
 
-func New(sftp SFTPClient, root string, log *slog.Logger) *FileSystem {
+func New(sftp remote.FileClient, root string, log *slog.Logger) *FileSystem {
 	cleanRoot := path.Clean(root)
 	if cleanRoot == "." {
 		cleanRoot = "/"

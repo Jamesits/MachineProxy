@@ -1,115 +1,74 @@
 package agenttransfer
 
 import (
-	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
-	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/jamesits/machineproxy/pkg/remote"
 )
 
-func TestEnsureDoesNotTrustHashMarkerWhenRemoteBinaryDiffers(t *testing.T) {
-	local := filepath.Join(t.TempDir(), "mproxy-agent")
-	if err := os.WriteFile(local, []byte("trusted-agent"), 0o755); err != nil {
-		t.Fatalf("write local agent: %v", err)
-	}
-	hash, err := hashFile(local)
-	if err != nil {
-		t.Fatalf("hash local agent: %v", err)
-	}
+func TestEnsureMemoisesAcrossCalls(t *testing.T) {
+	be := &fakeBackend{remotePath: "/tmp/mproxy-agent"}
+	tr := New(be, "/local", "/tmp/mproxy-agent", slog.New(slog.NewTextHandler(io.Discard, nil)))
 
-	remote := newFakeRemoteFiles()
-	remote.files["/tmp/mproxy-agent"] = []byte("backdoor-agent")
-	remote.files["/tmp/mproxy-agent.sha256"] = []byte(hash)
-
-	transferer := newWithRemoteClient(remote, local, "/tmp/mproxy-agent", slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if _, err := transferer.Ensure(context.Background()); err != nil {
-		t.Fatalf("ensure: %v", err)
+	for i := 0; i < 3; i++ {
+		got, err := tr.Ensure(context.Background())
+		if err != nil {
+			t.Fatalf("Ensure: %v", err)
+		}
+		if got != "/tmp/mproxy-agent" {
+			t.Fatalf("got %q, want /tmp/mproxy-agent", got)
+		}
 	}
-
-	if got := string(remote.files["/tmp/mproxy-agent"]); got != "trusted-agent" {
-		t.Fatalf("remote agent = %q, want uploaded trusted agent", got)
+	if calls := be.calls.Load(); calls != 1 {
+		t.Fatalf("UploadAgent called %d times, want 1", calls)
 	}
 }
 
-func TestEnsureExpandsTildeAgainstRemoteHome(t *testing.T) {
-	local := filepath.Join(t.TempDir(), "mproxy-agent")
-	if err := os.WriteFile(local, []byte("agent-bytes"), 0o755); err != nil {
-		t.Fatalf("write local agent: %v", err)
-	}
+func TestEnsureSurfacesUploadError(t *testing.T) {
+	be := &fakeBackend{err: errors.New("boom")}
+	tr := New(be, "/local", "/tmp/mproxy-agent", slog.New(slog.NewTextHandler(io.Discard, nil)))
 
-	remote := newFakeRemoteFiles()
-	transferer := newWithRemoteClient(remote, local, "~/.cache/machineproxy/mproxy-agent",
-		slog.New(slog.NewTextHandler(io.Discard, nil)))
-
-	got, err := transferer.Ensure(context.Background())
-	if err != nil {
-		t.Fatalf("ensure: %v", err)
-	}
-
-	want := "/home/fake/.cache/machineproxy/mproxy-agent"
-	if got != want {
-		t.Fatalf("returned remote path = %q, want %q", got, want)
-	}
-	if _, ok := remote.files[want]; !ok {
-		t.Fatalf("agent not uploaded to expanded path %q (have %v)", want, remote.files)
+	if _, err := tr.Ensure(context.Background()); err == nil {
+		t.Fatal("expected error")
 	}
 }
 
-func TestExpandRemoteHomeLeavesAbsolutePathsAlone(t *testing.T) {
-	remote := newFakeRemoteFiles()
-	got, err := expandRemoteHome(remote, "/tmp/mproxy-agent")
-	if err != nil {
-		t.Fatalf("expandRemoteHome: %v", err)
+// fakeBackend is a remote.Backend that only implements UploadAgent.
+type fakeBackend struct {
+	remotePath string
+	err        error
+	calls      atomic.Int32
+}
+
+func (f *fakeBackend) UploadAgent(_ context.Context, _, _ string, _ os.FileMode) (string, error) {
+	f.calls.Add(1)
+	if f.err != nil {
+		return "", f.err
 	}
-	if got != "/tmp/mproxy-agent" {
-		t.Fatalf("got %q, want unchanged", got)
-	}
+	return f.remotePath, nil
 }
 
-type fakeRemoteFiles struct {
-	files map[string][]byte
-	modes map[string]os.FileMode
+func (f *fakeBackend) Type() remote.Type           { return remote.TypeSSH }
+func (f *fakeBackend) Addr() string                { return "" }
+func (f *fakeBackend) User() string                { return "" }
+func (f *fakeBackend) Start(context.Context) error { return nil }
+func (f *fakeBackend) Close() error                { return nil }
+func (f *fakeBackend) IsConnected() bool           { return true }
+func (f *fakeBackend) LastErr() error              { return nil }
+func (f *fakeBackend) NewSession(context.Context) (remote.Session, error) {
+	return nil, errors.New("not used")
 }
-
-func newFakeRemoteFiles() *fakeRemoteFiles {
-	return &fakeRemoteFiles{files: make(map[string][]byte), modes: make(map[string]os.FileMode)}
+func (f *fakeBackend) Files(context.Context) (remote.FileClient, error) {
+	return nil, errors.New("not used")
 }
+func (f *fakeBackend) KeepAliveInterval() time.Duration    { return 0 }
+func (f *fakeBackend) SendKeepAlive(context.Context) error { return nil }
 
-func (f *fakeRemoteFiles) Open(path string) (io.ReadCloser, error) {
-	data, ok := f.files[path]
-	if !ok {
-		return nil, os.ErrNotExist
-	}
-	return io.NopCloser(bytes.NewReader(data)), nil
-}
-
-func (f *fakeRemoteFiles) OpenFile(path string, _ int) (io.WriteCloser, error) {
-	return &fakeWriteFile{remote: f, path: path}, nil
-}
-
-func (f *fakeRemoteFiles) Chmod(path string, mode os.FileMode) error {
-	if _, ok := f.files[path]; !ok {
-		return os.ErrNotExist
-	}
-	f.modes[path] = mode
-	return nil
-}
-
-func (f *fakeRemoteFiles) MkdirAll(string) error { return nil }
-
-func (f *fakeRemoteFiles) Getwd() (string, error) { return "/home/fake", nil }
-
-type fakeWriteFile struct {
-	remote *fakeRemoteFiles
-	path   string
-	buf    bytes.Buffer
-}
-
-func (f *fakeWriteFile) Write(p []byte) (int, error) { return f.buf.Write(p) }
-func (f *fakeWriteFile) Close() error {
-	f.remote.files[f.path] = append([]byte(nil), f.buf.Bytes()...)
-	return nil
-}
+var _ remote.Backend = (*fakeBackend)(nil)

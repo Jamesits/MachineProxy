@@ -1,3 +1,5 @@
+//go:build backend_ssh
+
 package sshconn
 
 import (

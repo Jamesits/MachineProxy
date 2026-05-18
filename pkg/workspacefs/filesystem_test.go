@@ -8,6 +8,8 @@ import (
 	"path"
 	"syscall"
 	"testing"
+
+	"github.com/jamesits/machineproxy/pkg/remote"
 )
 
 func TestReadFileDelegatesToSFTP(t *testing.T) {
@@ -91,13 +93,16 @@ func TestMkDirDelegatesToSFTP(t *testing.T) {
 	}
 }
 
+// fakeSFTPClient is an in-memory remote.FileClient used for unit tests.
 type fakeSFTPClient struct {
 	files      map[string][]byte
 	dirs       map[string]bool
 	lastOpened string
 }
 
-func (f *fakeSFTPClient) Open(p string) (RemoteFile, error) {
+var _ remote.FileClient = (*fakeSFTPClient)(nil)
+
+func (f *fakeSFTPClient) Open(p string) (remote.RemoteFile, error) {
 	f.lastOpened = path.Clean(p)
 	data, ok := f.files[f.lastOpened]
 	if !ok {
@@ -106,13 +111,13 @@ func (f *fakeSFTPClient) Open(p string) (RemoteFile, error) {
 	return &fakeRemoteFile{data: data}, nil
 }
 
-func (f *fakeSFTPClient) Create(p string) (RemoteWriteFile, error) {
+func (f *fakeSFTPClient) Create(p string) (remote.RemoteWriteFile, error) {
 	clean := path.Clean(p)
 	f.files[clean] = []byte{}
 	return &fakeRemoteWriteFile{client: f, path: clean}, nil
 }
 
-func (f *fakeSFTPClient) OpenFile(p string, flags int) (RemoteWriteFile, error) {
+func (f *fakeSFTPClient) OpenFile(p string, flags int) (remote.RemoteWriteFile, error) {
 	clean := path.Clean(p)
 	if _, ok := f.files[clean]; !ok {
 		return nil, os.ErrNotExist
@@ -136,6 +141,8 @@ func (f *fakeSFTPClient) Mkdir(p string) error {
 	f.dirs[clean] = true
 	return nil
 }
+
+func (f *fakeSFTPClient) MkdirAll(p string) error { return f.Mkdir(p) }
 
 func (f *fakeSFTPClient) Remove(p string) error {
 	clean := path.Clean(p)
@@ -167,13 +174,23 @@ func (f *fakeSFTPClient) Truncate(p string, size int64) error {
 	return nil
 }
 
+func (f *fakeSFTPClient) Getwd() (string, error) { return "/", nil }
+
 type fakeRemoteFile struct {
 	data []byte
+	pos  int64
 }
 
 type fakeRemoteWriteFile struct {
 	client *fakeSFTPClient
 	path   string
+	pos    int64
+}
+
+func (f *fakeRemoteFile) Read(p []byte) (int, error) {
+	n, err := f.ReadAt(p, f.pos)
+	f.pos += int64(n)
+	return n, err
 }
 
 func (f *fakeRemoteFile) ReadAt(p []byte, off int64) (int, error) {
@@ -188,6 +205,12 @@ func (f *fakeRemoteFile) ReadAt(p []byte, off int64) (int, error) {
 }
 
 func (f *fakeRemoteFile) Close() error { return nil }
+
+func (f *fakeRemoteWriteFile) Write(p []byte) (int, error) {
+	n, err := f.WriteAt(p, f.pos)
+	f.pos += int64(n)
+	return n, err
+}
 
 func (f *fakeRemoteWriteFile) WriteAt(p []byte, off int64) (int, error) {
 	existing := f.client.files[f.path]

@@ -13,12 +13,12 @@ import (
 	"github.com/jamesits/machineproxy/pkg/config"
 	"github.com/jamesits/machineproxy/pkg/initcmd"
 	"github.com/jamesits/machineproxy/pkg/logging"
+	"github.com/jamesits/machineproxy/pkg/remote"
 	"github.com/jamesits/machineproxy/pkg/supervisor"
 )
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
-		// Propagate the child process exit code when available.
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			os.Exit(exitErr.ExitCode())
@@ -43,29 +43,62 @@ func run(rawArgs []string) error {
 		return fmt.Errorf("load config %q: %w", parsed.cfgPath, err)
 	}
 
-	if parsed.host != "" {
-		cfg.Remote.SSH.Host = parsed.host
+	// CLI --backend overrides config remote.type.
+	if parsed.backend != "" {
+		cfg.Remote.Type = parsed.backend
+	}
+
+	// Resolve the destination (if supplied) and apply it to the
+	// right backend-specific config block. The destination's scheme
+	// (when present) selects the backend even without --backend.
+	if parsed.destination != "" {
+		defaultType := remote.TypeSSH
+		if cfg.Remote.Type != "" {
+			defaultType = remote.Type(cfg.Remote.Type)
+		}
+		dst, err := remote.ParseDestination(parsed.destination, defaultType)
+		if err != nil {
+			return err
+		}
+		if parsed.backend != "" && parsed.backend != string(dst.Type) {
+			return fmt.Errorf("--backend=%s conflicts with destination scheme %s://", parsed.backend, dst.Type)
+		}
+		cfg.Remote.Type = string(dst.Type)
+		switch dst.Type {
+		case remote.TypeSSH:
+			cfg.Remote.SSH.Host = dst.Host
+			if dst.User != "" {
+				cfg.Remote.SSH.User = dst.User
+			}
+			if dst.Port != 0 {
+				cfg.Remote.SSH.Port = dst.Port
+			}
+		case remote.TypeDocker:
+			cfg.Remote.Docker.Container = dst.Host
+		}
+	}
+
+	if parsed.port != 0 {
+		if remote.Type(cfg.Remote.Type) != remote.TypeSSH {
+			return fmt.Errorf("-p/--port is only valid for backend ssh (got %q)", cfg.Remote.Type)
+		}
+		cfg.Remote.SSH.Port = parsed.port
 	}
 	if parsed.user != "" {
+		if remote.Type(cfg.Remote.Type) != remote.TypeSSH {
+			return fmt.Errorf("-l/--login is only valid for backend ssh (got %q)", cfg.Remote.Type)
+		}
 		cfg.Remote.SSH.User = parsed.user
-	}
-	if parsed.port != 0 {
-		cfg.Remote.SSH.Port = parsed.port
 	}
 	if parsed.arch != "" {
 		cfg.Remote.Arch = parsed.arch
 	}
 	if len(parsed.mounts) > 0 {
-		// -v entries take precedence over config, so put them first.
-		// The first mount also seeds container.working_dir when unset.
 		cfg.Container.Mounts = append(parsed.mounts, cfg.Container.Mounts...)
 	}
 	if parsed.workdir != "" {
 		cfg.Container.WorkingDir = parsed.workdir
 	}
-	// If nothing supplied mounts (neither config nor -v), fall back to the
-	// caller's current directory so `machineproxy host -- cmd` works from
-	// any workspace without bespoke configuration.
 	if len(cfg.Container.Mounts) == 0 {
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -91,11 +124,6 @@ func run(rawArgs []string) error {
 		return fmt.Errorf("missing command to run")
 	}
 
-	// Resolve the entrypoint here, outside the container, against the
-	// host PATH minus the path-stub directory. The path-stub serves
-	// FUSE-backed remote ELFs that the local kernel cannot load, so
-	// even when path_proxy is "prepend" the initial exec must come
-	// from a real local binary.
 	initcmdLog := log.With("component", "initcmd")
 	resolved, err := initcmd.LookPath(ctx, initcmdLog, parsed.cmd[0], os.Getenv("PATH"), cfg.Container.PathStubDir)
 	if err != nil {
@@ -104,10 +132,6 @@ func run(rawArgs []string) error {
 	log.Debug("initial command resolved", "input", parsed.cmd[0], "resolved", resolved)
 	parsed.cmd[0] = resolved
 
-	// Auto-whitelist the entrypoint (plus its shebang chain) so the
-	// tracer lets the kernel's exec-recursion through binfmt_script and
-	// any in-process re-exec land locally instead of being routed to
-	// the remote, where the same path may not exist.
 	if cfg.Container.ForceResolveInitialCommandLocally != nil && *cfg.Container.ForceResolveInitialCommandLocally {
 		derived, derr := initcmd.DeriveLocalCommands(ctx, initcmdLog, resolved)
 		if derr != nil {
@@ -123,7 +147,7 @@ func run(rawArgs []string) error {
 		log.Debug("container.local_commands is empty; every exec will be forwarded to the remote")
 	}
 
-	log.Debug("starting machineproxy", "command", parsed.cmd)
+	log.Debug("starting machineproxy", "command", parsed.cmd, "backend", cfg.Remote.Type)
 
 	deps, err := newRuntimeDeps(cfg, log)
 	if err != nil {
@@ -132,7 +156,7 @@ func run(rawArgs []string) error {
 	defer deps.Close()
 
 	sup := supervisor.New(supervisor.Deps{
-		SSH:       deps,
+		Backend:   deps,
 		NS:        deps,
 		FS:        deps,
 		PathStubs: deps,
@@ -145,14 +169,15 @@ func run(rawArgs []string) error {
 }
 
 // cliArgs captures everything parsed off the command line: machineproxy's
-// own flags, the OpenSSH-style destination override, and the child
-// command to run inside the container.
+// own flags, the destination override, and the child command to run inside
+// the container.
 type cliArgs struct {
 	cfgPath     string
 	showVersion bool
-	port        int // 0 = unset; overrides remote.ssh.port when nonzero
+	backend     string // empty = use config; "ssh"/"docker" otherwise
+	destination string // raw destination string; parsed in run()
+	port        int    // 0 = unset; overrides remote.ssh.port when nonzero
 	user        string
-	host        string
 	arch        string   // empty = unset; overrides remote.arch when set
 	mounts      []string // prepended to container.mounts (CLI first)
 	workdir     string   // empty = unset; overrides container.working_dir
@@ -175,15 +200,13 @@ func (r *repeatedString) Set(v string) error {
 	return nil
 }
 
-// parseCLIArgs implements the OpenSSH-compatible invocation:
+// parseCLIArgs implements:
 //
-//	machineproxy [flags] [-p port] [-l user] [[user@]host] [--] [cmd...]
+//	machineproxy [flags] [-p port] [-l user] DEST [-- cmd...]
 //
-// The first standalone "--" separates the destination section from the
-// command section. Because Go's flag package consumes a "--" that
-// immediately follows the last flag, we split on "--" ourselves before
-// invoking flag.Parse so callers can write `machineproxy -- cmd` to mean
-// "keep the destination from the config file."
+// DEST is either a bare host (back-compat: defaults to ssh), or a
+// scheme-prefixed destination such as ssh://user@host:port or
+// docker://container.
 func parseCLIArgs(args []string) (*cliArgs, error) {
 	sepIdx := -1
 	for i, a := range args {
@@ -207,12 +230,11 @@ func parseCLIArgs(args []string) (*cliArgs, error) {
 	fs := flag.NewFlagSet("machineproxy", flag.ContinueOnError)
 	fs.StringVar(&out.cfgPath, "config", "/etc/machineproxy/machineproxy.toml", "path to machineproxy config file (TOML/YAML/JSON)")
 	fs.BoolVar(&out.showVersion, "version", false, "print version")
-	// Register both the OpenSSH-style short flag and a long alias for each
-	// override. Both point at the same destination so either form parses.
-	const portUsage = "remote SSH `port` (overrides remote.ssh.port)"
+	fs.StringVar(&out.backend, "backend", "", "remote backend `type` (ssh or docker); overrides remote.type from config")
+	const portUsage = "remote SSH `port` (overrides remote.ssh.port; ssh-only)"
 	fs.IntVar(&out.port, "p", 0, portUsage)
 	fs.IntVar(&out.port, "port", 0, portUsage)
-	const loginUsage = "remote SSH `user` (overrides remote.ssh.user and any user@host destination)"
+	const loginUsage = "remote SSH `user` (overrides remote.ssh.user; ssh-only)"
 	fs.StringVar(&loginUser, "l", "", loginUsage)
 	fs.StringVar(&loginUser, "login", "", loginUsage)
 	fs.StringVar(&out.arch, "arch", "", "remote machine `arch` for agent binary selection (overrides remote.arch)")
@@ -233,32 +255,20 @@ func parseCLIArgs(args []string) (*cliArgs, error) {
 			return nil, fmt.Errorf("unexpected arguments before --: %v", positional[1:])
 		}
 		if len(positional) == 1 {
-			out.user, out.host = splitUserHost(positional[0])
+			out.destination = positional[0]
 		}
 		if len(afterSep) > 0 {
 			out.cmd = afterSep
 		}
 	} else if len(positional) > 0 {
-		out.user, out.host = splitUserHost(positional[0])
+		out.destination = positional[0]
 		if len(positional) > 1 {
 			out.cmd = positional[1:]
 		}
 	}
 
-	// -l/--login wins over any user encoded in [user@]host, matching
-	// `ssh -l`.
 	if loginUser != "" {
 		out.user = loginUser
 	}
 	return out, nil
-}
-
-// splitUserHost splits an OpenSSH-style "[user@]host" destination. The
-// last "@" is the separator so IPv6 literals like "user@2001:db8::1"
-// parse correctly. A bare "host" returns user="".
-func splitUserHost(s string) (user, host string) {
-	if i := strings.LastIndex(s, "@"); i >= 0 {
-		return s[:i], s[i+1:]
-	}
-	return "", s
 }

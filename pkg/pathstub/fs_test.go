@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/jamesits/machineproxy/pkg/agentproto"
+	"github.com/jamesits/machineproxy/pkg/remote"
 )
 
 type fakeOpener struct {
@@ -18,7 +19,7 @@ type fakeOpener struct {
 	lastOpened string
 }
 
-func (f *fakeOpener) Open(path string) (RemoteFile, error) {
+func (f *fakeOpener) Open(path string) (remote.RemoteFile, error) {
 	f.lastOpened = path
 	if f.openErr != nil {
 		return nil, f.openErr
@@ -30,7 +31,16 @@ func (f *fakeOpener) Open(path string) (RemoteFile, error) {
 	return &fakeRemoteFile{data: data}, nil
 }
 
-type fakeRemoteFile struct{ data []byte }
+type fakeRemoteFile struct {
+	data []byte
+	pos  int64
+}
+
+func (f *fakeRemoteFile) Read(p []byte) (int, error) {
+	n, err := f.ReadAt(p, f.pos)
+	f.pos += int64(n)
+	return n, err
+}
 
 func (f *fakeRemoteFile) ReadAt(p []byte, off int64) (int, error) {
 	if off >= int64(len(f.data)) {

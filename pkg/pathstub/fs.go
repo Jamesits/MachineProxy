@@ -11,21 +11,14 @@ import (
 
 	"github.com/jamesits/machineproxy/pkg/agentproto"
 	"github.com/jamesits/machineproxy/pkg/logging"
+	"github.com/jamesits/machineproxy/pkg/remote"
 )
 
-// RemoteFile is the subset of *sftp.File methods needed for read-only
-// proxying. It matches workspacefs.RemoteFile so the same SFTPAdapter
-// can be reused if desired.
-type RemoteFile interface {
-	ReadAt(p []byte, off int64) (int, error)
-	Close() error
-}
-
-// RemoteOpener opens a remote file by absolute path for reading. The
-// concrete sftp client implements this directly (Open returns
-// *sftp.File which satisfies RemoteFile).
+// RemoteOpener opens a remote file by absolute path for reading. Today
+// it is satisfied by remote.FileClient and any narrower interface that
+// exposes Open(path) → (remote.RemoteFile, error).
 type RemoteOpener interface {
-	Open(path string) (RemoteFile, error)
+	Open(path string) (remote.RemoteFile, error)
 }
 
 // Entry is one immutable stub entry.

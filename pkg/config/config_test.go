@@ -7,6 +7,78 @@ import (
 	"testing"
 )
 
+func TestLoadDefaultsRemoteTypeSSH(t *testing.T) {
+	raw := `
+remote:
+  ssh:
+    host: 127.0.0.1
+container:
+  local_commands: []
+  mounts:
+    - /workspace
+`
+	cfg, err := Load(strings.NewReader(raw))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Remote.Type != "ssh" {
+		t.Fatalf("Remote.Type = %q, want ssh", cfg.Remote.Type)
+	}
+}
+
+func TestLoadAcceptsRemoteTypeDocker(t *testing.T) {
+	raw := `
+remote:
+  type: docker
+  docker:
+    container: my-box
+container:
+  local_commands: []
+  mounts:
+    - /workspace
+`
+	cfg, err := Load(strings.NewReader(raw))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Remote.Type != "docker" {
+		t.Fatalf("Remote.Type = %q, want docker", cfg.Remote.Type)
+	}
+	if cfg.Remote.Docker.Container != "my-box" {
+		t.Fatalf("Docker.Container = %q, want my-box", cfg.Remote.Docker.Container)
+	}
+}
+
+func TestLoadRejectsDockerWithoutContainer(t *testing.T) {
+	raw := `
+remote:
+  type: docker
+container:
+  local_commands: []
+  mounts:
+    - /workspace
+`
+	_, err := Load(strings.NewReader(raw))
+	if err == nil || !strings.Contains(err.Error(), "remote.docker.container") {
+		t.Fatalf("expected docker container error, got: %v", err)
+	}
+}
+
+func TestLoadRejectsUnknownRemoteType(t *testing.T) {
+	raw := `
+remote:
+  type: k8s
+container:
+  local_commands: []
+  mounts:
+    - /workspace
+`
+	_, err := Load(strings.NewReader(raw))
+	if err == nil || !strings.Contains(err.Error(), "remote.type") {
+		t.Fatalf("expected remote.type error, got: %v", err)
+	}
+}
+
 func TestLoadAcceptsEmptyLocalCommands(t *testing.T) {
 	// Empty local_commands is valid: it means every exec is routed to
 	// the remote. Minimal configs (e.g. those written by CI) rely on this.

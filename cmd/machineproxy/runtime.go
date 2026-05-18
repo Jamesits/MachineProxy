@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/hanwen/go-fuse/v2/fuse"
-	"github.com/pkg/sftp"
 
 	"github.com/jamesits/machineproxy/pkg/agentproto"
 	"github.com/jamesits/machineproxy/pkg/agenttransfer"
@@ -23,8 +22,8 @@ import (
 	"github.com/jamesits/machineproxy/pkg/logging"
 	"github.com/jamesits/machineproxy/pkg/ns"
 	"github.com/jamesits/machineproxy/pkg/pathstub"
+	"github.com/jamesits/machineproxy/pkg/remote"
 	"github.com/jamesits/machineproxy/pkg/remoteexec"
-	"github.com/jamesits/machineproxy/pkg/sshconn"
 	"github.com/jamesits/machineproxy/pkg/workspacefs"
 )
 
@@ -32,8 +31,7 @@ type runtimeDeps struct {
 	cfg *config.Config
 	log *slog.Logger
 
-	sshAddr         string // resolved "host:port" after ssh_config lookup
-	sshManager      *sshconn.Manager
+	backend         remote.Backend
 	namespace       *ns.Namespace
 	fuseServer      *fuse.Server
 	bkr             *broker.Server
@@ -59,27 +57,14 @@ type runtimeDeps struct {
 }
 
 func newRuntimeDeps(cfg *config.Config, log *slog.Logger) (*runtimeDeps, error) {
-	sshLog := log.With("component", "ssh")
-	dialer, err := sshconn.NewDialer(sshconn.DialConfig{
-		Host:    cfg.Remote.SSH.Host,
-		User:    cfg.Remote.SSH.User,
-		Port:    cfg.Remote.SSH.Port,
-		Timeout: 10 * time.Second,
-	})
+	backend, err := buildBackend(cfg, log)
 	if err != nil {
 		return nil, err
 	}
-
 	return &runtimeDeps{
-		cfg:     cfg,
-		log:     log,
-		sshAddr: dialer.Addr,
-		sshManager: sshconn.NewManager(sshconn.Options{
-			Dial:              dialer.Dial,
-			ReconnectInterval: time.Second,
-			KeepAliveInterval: dialer.KeepAliveInterval,
-			Log:               sshLog,
-		}),
+		cfg:       cfg,
+		log:       log,
+		backend:   backend,
 		namespace: ns.New(ns.Deps{Log: log.With("component", "ns")}),
 	}, nil
 }
@@ -94,7 +79,6 @@ func (d *runtimeDeps) Close() {
 	if d.brokerCtxCancel != nil {
 		d.brokerCtxCancel()
 	}
-	// Clean up the broker socket to prevent leak.
 	if d.brokerSocket != "" {
 		_ = os.Remove(d.brokerSocket)
 	}
@@ -129,40 +113,41 @@ func (d *runtimeDeps) Close() {
 		d.fuseMountDir = ""
 	}
 	d.namespace.Leave()
-	if d.sshManager != nil {
-		if err := d.sshManager.Close(); err != nil {
-			d.log.Warn("failed to close ssh manager", "error", err)
+	if d.backend != nil {
+		if err := d.backend.Close(); err != nil {
+			d.log.Warn("failed to close backend", "error", err)
 		}
 	}
 }
 
-func (d *runtimeDeps) StartSSH(ctx context.Context) error {
-	d.log.Log(ctx, logging.LevelTrace, "starting ssh manager", "addr", d.sshAddr, "user", d.cfg.Remote.SSH.User)
-	if err := d.sshManager.Start(ctx); err != nil {
+// StartBackend opens the remote connection and (for Docker) uploads
+// the agent binary so the FileClient can come online.
+func (d *runtimeDeps) StartBackend(ctx context.Context) error {
+	d.log.Log(ctx, logging.LevelTrace, "starting backend", "type", d.backend.Type(), "addr", d.backend.Addr())
+	if err := d.backend.Start(ctx); err != nil {
 		return err
 	}
+	d.log.Debug("backend connected", "type", d.backend.Type(), "addr", d.backend.Addr())
 
-	timer := time.NewTimer(15 * time.Second)
-	defer timer.Stop()
-	tick := time.NewTicker(100 * time.Millisecond)
-	defer tick.Stop()
-
-	for {
-		if d.sshManager.IsConnected() {
-			d.log.Debug("ssh connected", "addr", d.sshAddr)
-			return nil
+	// For backends that need an explicit bootstrap upload before
+	// Files() can return a usable client, do it now. SSH self-hosts
+	// the agent via SFTP, so its UploadAgent is harmless to call
+	// eagerly too — but we keep the call out of the SSH path because
+	// the existing flow uploads lazily via agenttransfer.Transferer.
+	if d.backend.Type() == remote.TypeDocker {
+		agentLocalPath, err := config.ResolveAgentBinaryPath(
+			d.cfg.Components.AgentLocalPath,
+			d.cfg.Remote.OS,
+			d.cfg.Remote.Arch,
+		)
+		if err != nil {
+			return fmt.Errorf("resolve agent binary: %w", err)
 		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-timer.C:
-			if lastErr := d.sshManager.LastErr(); lastErr != nil {
-				return fmt.Errorf("timed out waiting for ssh connection: %w", lastErr)
-			}
-			return errors.New("timed out waiting for persistent ssh connection")
-		case <-tick.C:
+		if _, err := d.backend.UploadAgent(ctx, agentLocalPath, d.cfg.Components.AgentRemotePath, 0o755); err != nil {
+			return fmt.Errorf("upload agent to docker container: %w", err)
 		}
 	}
+	return nil
 }
 
 func (d *runtimeDeps) EnterNamespace(ctx context.Context) error {
@@ -175,21 +160,17 @@ func (d *runtimeDeps) EnterNamespace(ctx context.Context) error {
 }
 
 func (d *runtimeDeps) MountWorkspace(ctx context.Context) error {
-	// Parse the first mount entry for the workspace FUSE mount.
 	mount, err := config.ParseMount(d.cfg.Container.Mounts[0])
 	if err != nil {
 		return fmt.Errorf("parse workspace mount: %w", err)
 	}
 
-	raw := d.sshManager.SFTP()
-	sftpClient, ok := raw.(*sftp.Client)
-	if !ok {
-		return fmt.Errorf("ssh sftp client is not *sftp.Client")
+	fc, err := d.backend.Files(ctx)
+	if err != nil {
+		return err
 	}
 
-	// Resolve a possibly home-relative remote path against the SFTP
-	// server's working dir (typically the remote user's home).
-	remoteHome, err := sftpClient.Getwd()
+	remoteHome, err := fc.Getwd()
 	if err != nil {
 		return fmt.Errorf("get remote home dir for mount expansion: %w", err)
 	}
@@ -202,16 +183,16 @@ func (d *runtimeDeps) MountWorkspace(ctx context.Context) error {
 
 	d.log.Log(ctx, logging.LevelTrace, "mounting workspace", "remote_path", mount.RemotePath)
 
-	// Verify the remote workspace is reachable up front. Without this check,
-	// FUSE happily mounts an unusable backend and the failure surfaces later
-	// as a confusing "bwrap: source No such file or directory" because every
-	// stat on the mountpoint forwards to a failing SFTP Stat.
-	st, err := sftpClient.Stat(mount.RemotePath)
+	st, err := fc.Stat(mount.RemotePath)
 	if err != nil {
-		return fmt.Errorf("remote workspace %q not reachable: %w", mount.RemotePath, err)
+		err = fmt.Errorf("remote workspace %q not reachable: %w", mount.RemotePath, err)
+		d.log.Error("workspace not found", "error", err)
+		return err
 	}
 	if !st.IsDir() {
-		return fmt.Errorf("remote workspace %q is not a directory", mount.RemotePath)
+		err = fmt.Errorf("remote workspace %q is not a directory", mount.RemotePath)
+		d.log.Error("workspace not a directory", "error", err)
+		return err
 	}
 
 	tmpDir, err := os.MkdirTemp("", "machineproxy-fuse-*")
@@ -220,11 +201,6 @@ func (d *runtimeDeps) MountWorkspace(ctx context.Context) error {
 	}
 	d.fuseMountDir = tmpDir
 
-	// Roll back any partial mount state on early-return errors so we never
-	// leave a stray FUSE mount or empty temp directory behind. Without this,
-	// failures after the tmpDir is created (e.g., a half-established FUSE
-	// mount) only get cleaned up by Close() at process exit, which may run
-	// long after the kernel mount has become a problem.
 	success := false
 	defer func() {
 		if success {
@@ -243,7 +219,7 @@ func (d *runtimeDeps) MountWorkspace(ctx context.Context) error {
 	}()
 
 	fsLog := d.log.With("component", "fuse")
-	backend := workspacefs.New(&workspacefs.SFTPAdapter{C: sftpClient}, mount.RemotePath, fsLog)
+	backend := workspacefs.New(fc, mount.RemotePath, fsLog)
 	server, err := workspacefs.Mount(ctx, backend, d.fuseMountDir)
 	if err != nil {
 		return fmt.Errorf("mount workspace fuse: %w", err)
@@ -254,9 +230,6 @@ func (d *runtimeDeps) MountWorkspace(ctx context.Context) error {
 	return nil
 }
 
-// BuildPathStubs enumerates remote PATH executables and mounts a
-// read-only FUSE directory that surfaces them locally. It is a no-op
-// when path_proxy is "disabled" or enumeration produced no entries.
 func (d *runtimeDeps) BuildPathStubs(ctx context.Context) error {
 	if d.cfg.Container.PathProxy == "disabled" {
 		d.log.Debug("path proxy disabled; skipping enumeration")
@@ -274,21 +247,15 @@ func (d *runtimeDeps) BuildPathStubs(ctx context.Context) error {
 		return fmt.Errorf("resolve agent binary: %w", err)
 	}
 
-	sftpRaw := d.sshManager.SFTP()
-	sftpClient, ok := sftpRaw.(*sftp.Client)
-	if !ok {
-		return fmt.Errorf("sftp client is not *sftp.Client for path stub enumeration")
-	}
-
 	transferer := agenttransfer.New(
-		func() *sftp.Client { return sftpClient },
+		d.backend,
 		agentLocalPath,
 		d.cfg.Components.AgentRemotePath,
 		d.log.With("component", "transfer"),
 	)
 
 	runner := &remoteexec.AgentRunner{
-		Provider:   d.sshManager,
+		Provider:   d.backend,
 		Transferer: transferer,
 		AgentConfig: &agentproto.AgentConfig{
 			EnvKeep:   d.cfg.Agent.EnvKeep,
@@ -303,9 +270,6 @@ func (d *runtimeDeps) BuildPathStubs(ctx context.Context) error {
 	}
 	d.log.Debug("path enumeration returned entries", "count", len(entries))
 
-	// Drop names that local_commands routes locally. Without this the
-	// tracer would whitelist the stub and try to run a remote ELF as a
-	// local binary, which is rarely what the user wants.
 	totalEntries := len(entries)
 	filtered := pathstub.FilterLocalCommands(entries, d.cfg.Container.LocalCommands, d.cfg.Container.PathStubDir)
 	if skipped := totalEntries - len(filtered); skipped > 0 {
@@ -340,8 +304,12 @@ func (d *runtimeDeps) BuildPathStubs(ctx context.Context) error {
 		d.pathStubMountDir = ""
 	}()
 
+	fc, err := d.backend.Files(ctx)
+	if err != nil {
+		return err
+	}
 	fsLog := d.log.With("component", "pathstub-fuse")
-	backend := pathstub.New(&pathstubOpener{c: sftpClient}, filtered, fsLog)
+	backend := pathstub.New(fc, filtered, fsLog)
 	server, err := pathstub.Mount(ctx, backend, tmpDir)
 	if err != nil {
 		return fmt.Errorf("mount path-stub fuse: %w", err)
@@ -353,18 +321,7 @@ func (d *runtimeDeps) BuildPathStubs(ctx context.Context) error {
 	return nil
 }
 
-// pathstubOpener adapts *sftp.Client.Open (which returns *sftp.File) to
-// pathstub.RemoteOpener (which requires RemoteFile). Go's interface
-// satisfaction is invariant in return types, hence the trivial wrapper.
-type pathstubOpener struct{ c *sftp.Client }
-
-func (o *pathstubOpener) Open(path string) (pathstub.RemoteFile, error) {
-	return o.c.Open(path)
-}
-
 func (d *runtimeDeps) StartBroker(ctx context.Context) error {
-	// Keep the broker socket in a private directory so only this user can
-	// connect to the control channel that can launch remote commands.
 	socketPath, err := createBrokerSocketPath()
 	if err != nil {
 		return fmt.Errorf("create broker socket path: %w", err)
@@ -384,20 +341,13 @@ func (d *runtimeDeps) StartBroker(ctx context.Context) error {
 	}
 	d.log.Log(ctx, logging.LevelTrace, "resolved agent binary", "path", agentLocalPath)
 
-	sftpRaw := d.sshManager.SFTP()
-	sftpClient, ok := sftpRaw.(*sftp.Client)
-	if !ok {
-		return fmt.Errorf("sftp client is not *sftp.Client for agent transfer")
-	}
-
 	transferer := agenttransfer.New(
-		func() *sftp.Client { return sftpClient },
+		d.backend,
 		agentLocalPath,
 		d.cfg.Components.AgentRemotePath,
 		d.log.With("component", "transfer"),
 	)
 
-	// Set up session recording if configured.
 	if d.cfg.Recording.Path != "" && d.recorder == nil {
 		rec, recErr := agentproto.NewRecorder(d.cfg.Recording.Path)
 		if recErr != nil {
@@ -410,29 +360,24 @@ func (d *runtimeDeps) StartBroker(ctx context.Context) error {
 			username = u
 		}
 		if err := rec.WriteSessionHeader(&agentproto.SessionHeader{
-			Version:   config.Version,
-			StartTime: time.Now().UnixNano(),
-			LocalUser: username,
-			LocalPID:  os.Getpid(),
-			SSHAddr:   d.sshAddr,
-			SSHUser:   d.cfg.Remote.SSH.User,
-			AgentPath: d.cfg.Components.AgentRemotePath,
+			Version:     config.Version,
+			StartTime:   time.Now().UnixNano(),
+			LocalUser:   username,
+			LocalPID:    os.Getpid(),
+			BackendType: string(d.backend.Type()),
+			BackendAddr: d.backend.Addr(),
+			SSHAddr:     sshAddrIfSSH(d.backend),
+			SSHUser:     d.backend.User(),
+			AgentPath:   d.cfg.Components.AgentRemotePath,
 		}); err != nil {
 			d.log.Warn("failed to write session header", "error", err)
 		}
 	}
 
-	// Build a path mapper that rewrites container-local paths to remote
-	// paths so the agent can chdir and exec correctly on the remote host.
-	// Two prefixes can be rewritten:
-	//   - the workspace mount   (containerPath → remotePath)
-	//   - the path-stub mount   (<stub_dir>/<name> → real remote binary)
-	// MountWorkspace already resolved the remote half of the workspace
-	// mount against the remote user's home directory.
 	containerPrefix := d.workspaceMount.ContainerPath
 	remotePrefix := d.workspaceMount.RemotePath
 	stubPrefix := d.cfg.Container.PathStubDir
-	stubMap := d.stubEntries // nil when path proxy is disabled or empty
+	stubMap := d.stubEntries
 
 	hasWorkspaceRewrite := containerPrefix != remotePrefix
 	hasStubRewrite := len(stubMap) > 0
@@ -460,15 +405,14 @@ func (d *runtimeDeps) StartBroker(ctx context.Context) error {
 	brokerLog := d.log.With("component", "broker")
 	envKeep := d.cfg.Agent.EnvKeep
 	envRemove := d.cfg.Agent.EnvRemove
-	// stripStub removes the local stub mount from PATH before the agent
-	// runs the remote child — the remote machine has no such directory.
+	_ = envKeep
 	stripStub := stubPrefix
 	if !hasStubRewrite {
 		stripStub = ""
 	}
 	d.bkr = broker.NewServer(broker.Deps{
 		Remote: &remoteexec.AgentRunner{
-			Provider:   d.sshManager,
+			Provider:   d.backend,
 			Transferer: transferer,
 			Recorder:   d.recorder,
 			AgentConfig: &agentproto.AgentConfig{
@@ -478,7 +422,7 @@ func (d *runtimeDeps) StartBroker(ctx context.Context) error {
 			Log: d.log.With("component", "runner"),
 		},
 		EnvFilter: func(env []string) []string {
-			filtered := envfilter.Filter(env, envKeep, envRemove)
+			filtered := envfilter.Filter(env, d.cfg.Agent.EnvKeep, envRemove)
 			return envfilter.StripPathSegment(filtered, stripStub)
 		},
 		PathMapper: pathMapper,
@@ -514,8 +458,6 @@ func (d *runtimeDeps) StartBroker(ctx context.Context) error {
 }
 
 func createBrokerSocketPath() (string, error) {
-	// Directory creation is also guarded by a private umask so the entire
-	// broker control path remains private even under permissive parent umasks.
 	oldUmask := syscall.Umask(0o077)
 	defer syscall.Umask(oldUmask)
 
@@ -557,14 +499,10 @@ func (d *runtimeDeps) RunChild(ctx context.Context, cmdline []string) error {
 		pathInj,
 	)
 
-	// Strip env vars that should not leak into the container process.
 	env = envfilter.Remove(env, d.cfg.Container.EnvRemove)
 
-	// Use the workspace mount's local-side path (already absolute after
-	// ParseMount's tilde expansion) for the container bind target.
 	mount := d.workspaceMount
 
-	// Use explicit working_dir if set, otherwise default to the first mount's local path.
 	workingDir := d.cfg.Container.WorkingDir
 	if workingDir == "" {
 		workingDir = mount.ContainerPath
@@ -576,8 +514,6 @@ func (d *runtimeDeps) RunChild(ctx context.Context, cmdline []string) error {
 		binds = append(binds, ns.Bind{Src: d.pathStubMountDir, Dst: d.cfg.Container.PathStubDir})
 	}
 
-	// Wrap the command in the ptrace-based tracer so exec interception
-	// works with both dynamically and statically linked binaries.
 	tracerArgs := []string{
 		tracerBin,
 		"--shim-path", shimBin,
@@ -600,4 +536,14 @@ func currentUsername() (string, error) {
 		return "", err
 	}
 	return u.Username, nil
+}
+
+// sshAddrIfSSH returns the backend's address only when the backend is
+// SSH. The recording header keeps SSHAddr populated for SSH-style
+// sessions for back-compat with existing parsers.
+func sshAddrIfSSH(b remote.Backend) string {
+	if b.Type() == remote.TypeSSH {
+		return b.Addr()
+	}
+	return ""
 }

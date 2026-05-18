@@ -2,6 +2,10 @@
 log_level = "info"
 
 [remote]
+# Backend selector: "ssh" (default) or "docker". The CLI --backend
+# flag and scheme-prefixed destinations (ssh://, docker://) override
+# this at runtime.
+# type = "ssh"
 # Remote host OS and architecture used to select the agent binary.
 # Defaults to the local machine's runtime.GOOS / runtime.GOARCH.
 # os = "linux"
@@ -16,6 +20,15 @@ host = "remote.server.example.com"
 # resolved from ssh_config.
 # user = "dev"
 # port = 22
+
+# [remote.docker]
+# Attach to a running container by name or ID. The container must
+# already be running.
+# Connection settings honor the standard docker client env vars
+# (DOCKER_HOST, DOCKER_API_VERSION, DOCKER_TLS_VERIFY, DOCKER_CERT_PATH);
+# set host below to override DOCKER_HOST for this invocation only.
+# container = "my-dev-box"
+# host = "unix:///var/run/docker.sock"
 
 [container]
 # Commands that run locally inside the container instead of being forwarded

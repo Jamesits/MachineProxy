@@ -5,8 +5,10 @@ import (
 	"log/slog"
 )
 
-type SSH interface {
-	StartSSH(ctx context.Context) error
+// BackendStarter opens the remote connection (SSH dial, Docker
+// attach, …). Kept as an interface so runtime wiring stays in main.
+type BackendStarter interface {
+	StartBackend(ctx context.Context) error
 }
 
 type Namespace interface {
@@ -33,7 +35,7 @@ type PathStubs interface {
 }
 
 type Deps struct {
-	SSH       SSH
+	Backend   BackendStarter
 	NS        Namespace
 	FS        WorkspaceFS
 	PathStubs PathStubs // optional
@@ -54,8 +56,8 @@ func New(deps Deps) *Supervisor {
 }
 
 func (s *Supervisor) Run(ctx context.Context, cmd []string) error {
-	s.deps.Log.Debug("step 1/6: starting ssh")
-	if err := s.deps.SSH.StartSSH(ctx); err != nil {
+	s.deps.Log.Debug("step 1/6: starting backend")
+	if err := s.deps.Backend.StartBackend(ctx); err != nil {
 		return err
 	}
 	s.deps.Log.Debug("step 2/6: entering namespace")

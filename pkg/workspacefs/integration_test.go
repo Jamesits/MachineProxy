@@ -1,3 +1,5 @@
+//go:build backend_ssh
+
 package workspacefs
 
 import (
@@ -11,6 +13,8 @@ import (
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
+
+	"github.com/jamesits/machineproxy/pkg/remote"
 )
 
 func testFS(t *testing.T) *FileSystem {
@@ -59,8 +63,30 @@ func testFS(t *testing.T) *FileSystem {
 		cleanupDir(sftpClient, testDir)
 	})
 
-	return New(&SFTPAdapter{C: sftpClient}, testDir, nil)
+	return New(sftpClientAdapter{c: sftpClient}, testDir, nil)
 }
+
+// sftpClientAdapter is the test-local adapter that promotes a real
+// *sftp.Client to remote.FileClient. The production code path uses the
+// equivalent wrapper in pkg/remote/ssh.
+type sftpClientAdapter struct{ c *sftp.Client }
+
+func (a sftpClientAdapter) Open(p string) (remote.RemoteFile, error) { return a.c.Open(p) }
+func (a sftpClientAdapter) Create(p string) (remote.RemoteWriteFile, error) {
+	return a.c.Create(p)
+}
+func (a sftpClientAdapter) OpenFile(p string, flags int) (remote.RemoteWriteFile, error) {
+	return a.c.OpenFile(p, flags)
+}
+func (a sftpClientAdapter) Stat(p string) (os.FileInfo, error)      { return a.c.Stat(p) }
+func (a sftpClientAdapter) ReadDir(p string) ([]os.FileInfo, error) { return a.c.ReadDir(p) }
+func (a sftpClientAdapter) Mkdir(p string) error                    { return a.c.Mkdir(p) }
+func (a sftpClientAdapter) MkdirAll(p string) error                 { return a.c.MkdirAll(p) }
+func (a sftpClientAdapter) Remove(p string) error                   { return a.c.Remove(p) }
+func (a sftpClientAdapter) Rename(old, new string) error            { return a.c.Rename(old, new) }
+func (a sftpClientAdapter) Chmod(p string, mode os.FileMode) error  { return a.c.Chmod(p, mode) }
+func (a sftpClientAdapter) Truncate(p string, size int64) error     { return a.c.Truncate(p, size) }
+func (a sftpClientAdapter) Getwd() (string, error)                  { return a.c.Getwd() }
 
 func cleanupDir(c *sftp.Client, dir string) {
 	entries, _ := c.ReadDir(dir)

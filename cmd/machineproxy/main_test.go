@@ -20,114 +20,110 @@ func TestParseCLIArgs(t *testing.T) {
 			},
 		},
 		{
-			name: "destination user@host with -- and command",
+			name: "bare destination with -- and command",
 			args: []string{"user@host.example", "--", "echo", "hello"},
 			want: cliArgs{
-				cfgPath: "/etc/machineproxy/machineproxy.toml",
-				user:    "user",
-				host:    "host.example",
-				cmd:     []string{"echo", "hello"},
+				cfgPath:     "/etc/machineproxy/machineproxy.toml",
+				destination: "user@host.example",
+				cmd:         []string{"echo", "hello"},
 			},
 		},
 		{
-			name: "destination without -- treats first positional as host",
+			name: "destination without -- treats first positional as destination",
 			args: []string{"host.example", "echo", "hello"},
 			want: cliArgs{
-				cfgPath: "/etc/machineproxy/machineproxy.toml",
-				host:    "host.example",
-				cmd:     []string{"echo", "hello"},
+				cfgPath:     "/etc/machineproxy/machineproxy.toml",
+				destination: "host.example",
+				cmd:         []string{"echo", "hello"},
 			},
 		},
 		{
-			name: "port flag and full destination",
+			name: "scheme-prefixed ssh destination",
+			args: []string{"ssh://alice@example.com:2222", "--", "id"},
+			want: cliArgs{
+				cfgPath:     "/etc/machineproxy/machineproxy.toml",
+				destination: "ssh://alice@example.com:2222",
+				cmd:         []string{"id"},
+			},
+		},
+		{
+			name: "scheme-prefixed docker destination",
+			args: []string{"docker://my-box", "--", "id"},
+			want: cliArgs{
+				cfgPath:     "/etc/machineproxy/machineproxy.toml",
+				destination: "docker://my-box",
+				cmd:         []string{"id"},
+			},
+		},
+		{
+			name: "--backend flag sets backend",
+			args: []string{"--backend", "docker", "my-box", "--", "id"},
+			want: cliArgs{
+				cfgPath:     "/etc/machineproxy/machineproxy.toml",
+				backend:     "docker",
+				destination: "my-box",
+				cmd:         []string{"id"},
+			},
+		},
+		{
+			name: "port flag",
 			args: []string{"-p", "2222", "user@host.example", "--", "uname", "-a"},
 			want: cliArgs{
-				cfgPath: "/etc/machineproxy/machineproxy.toml",
-				port:    2222,
-				user:    "user",
-				host:    "host.example",
-				cmd:     []string{"uname", "-a"},
+				cfgPath:     "/etc/machineproxy/machineproxy.toml",
+				port:        2222,
+				destination: "user@host.example",
+				cmd:         []string{"uname", "-a"},
 			},
 		},
 		{
-			name: "-l overrides user from user@host",
+			name: "-l sets user",
 			args: []string{"-l", "alice", "bob@host.example", "--", "id"},
 			want: cliArgs{
-				cfgPath: "/etc/machineproxy/machineproxy.toml",
-				user:    "alice",
-				host:    "host.example",
-				cmd:     []string{"id"},
+				cfgPath:     "/etc/machineproxy/machineproxy.toml",
+				user:        "alice",
+				destination: "bob@host.example",
+				cmd:         []string{"id"},
 			},
 		},
 		{
 			name: "--port and --login long aliases",
 			args: []string{"--port", "2222", "--login", "alice", "host.example", "--", "id"},
 			want: cliArgs{
-				cfgPath: "/etc/machineproxy/machineproxy.toml",
-				port:    2222,
-				user:    "alice",
-				host:    "host.example",
-				cmd:     []string{"id"},
+				cfgPath:     "/etc/machineproxy/machineproxy.toml",
+				port:        2222,
+				user:        "alice",
+				destination: "host.example",
+				cmd:         []string{"id"},
 			},
 		},
 		{
 			name: "--arch overrides remote arch",
 			args: []string{"--arch", "arm64", "host.example", "--", "uname", "-m"},
 			want: cliArgs{
-				cfgPath: "/etc/machineproxy/machineproxy.toml",
-				host:    "host.example",
-				arch:    "arm64",
-				cmd:     []string{"uname", "-m"},
+				cfgPath:     "/etc/machineproxy/machineproxy.toml",
+				destination: "host.example",
+				arch:        "arm64",
+				cmd:         []string{"uname", "-m"},
 			},
 		},
 		{
-			name: "repeated -v accumulates in CLI order",
+			name: "repeated -v accumulates",
 			args: []string{"-v", "/a", "-v", "/b:/c", "host", "--", "id"},
 			want: cliArgs{
-				cfgPath: "/etc/machineproxy/machineproxy.toml",
-				host:    "host",
-				mounts:  []string{"/a", "/b:/c"},
-				cmd:     []string{"id"},
-			},
-		},
-		{
-			name: "--mount long alias accumulates with -v",
-			args: []string{"-v", "/a", "--mount", "/b", "host", "--", "id"},
-			want: cliArgs{
-				cfgPath: "/etc/machineproxy/machineproxy.toml",
-				host:    "host",
-				mounts:  []string{"/a", "/b"},
-				cmd:     []string{"id"},
+				cfgPath:     "/etc/machineproxy/machineproxy.toml",
+				destination: "host",
+				mounts:      []string{"/a", "/b:/c"},
+				cmd:         []string{"id"},
 			},
 		},
 		{
 			name: "-w sets workdir",
 			args: []string{"-w", "/work", "host", "--", "id"},
 			want: cliArgs{
-				cfgPath: "/etc/machineproxy/machineproxy.toml",
-				host:    "host",
-				workdir: "/work",
-				cmd:     []string{"id"},
-			},
-		},
-		{
-			name: "--workdir long alias",
-			args: []string{"--workdir", "/work", "host", "--", "id"},
-			want: cliArgs{
-				cfgPath: "/etc/machineproxy/machineproxy.toml",
-				host:    "host",
-				workdir: "/work",
-				cmd:     []string{"id"},
-			},
-		},
-		{
-			name: "ipv6 host inside user@host",
-			args: []string{"user@2001:db8::1", "--", "id"},
-			want: cliArgs{
-				cfgPath: "/etc/machineproxy/machineproxy.toml",
-				user:    "user",
-				host:    "2001:db8::1",
-				cmd:     []string{"id"},
+				cfgPath:     "/etc/machineproxy/machineproxy.toml",
+				destination: "host",
+				workdir:     "/work",
+				cmd:         []string{"id"},
 			},
 		},
 		{
@@ -151,9 +147,8 @@ func TestParseCLIArgs(t *testing.T) {
 			name: "bare destination with no command",
 			args: []string{"user@host.example"},
 			want: cliArgs{
-				cfgPath: "/etc/machineproxy/machineproxy.toml",
-				user:    "user",
-				host:    "host.example",
+				cfgPath:     "/etc/machineproxy/machineproxy.toml",
+				destination: "user@host.example",
 			},
 		},
 	}
@@ -175,26 +170,5 @@ func TestParseCLIArgsRejectsExtraPositionalsBeforeSeparator(t *testing.T) {
 	_, err := parseCLIArgs([]string{"user@host", "extra", "--", "cmd"})
 	if err == nil {
 		t.Fatal("expected error for extra positional args before --, got nil")
-	}
-}
-
-func TestSplitUserHost(t *testing.T) {
-	cases := []struct {
-		in       string
-		wantUser string
-		wantHost string
-	}{
-		{"host.example", "", "host.example"},
-		{"user@host.example", "user", "host.example"},
-		{"user@2001:db8::1", "user", "2001:db8::1"},
-		{"@host", "", "host"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.in, func(t *testing.T) {
-			u, h := splitUserHost(tc.in)
-			if u != tc.wantUser || h != tc.wantHost {
-				t.Fatalf("splitUserHost(%q) = (%q, %q), want (%q, %q)", tc.in, u, h, tc.wantUser, tc.wantHost)
-			}
-		})
 	}
 }

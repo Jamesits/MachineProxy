@@ -9,7 +9,7 @@ import (
 func TestSupervisorStartsNamespaceMountBrokerAndChildInOrder(t *testing.T) {
 	f := &fakeDeps{}
 	s := New(Deps{
-		SSH:      f,
+		Backend:  f,
 		NS:       f,
 		FS:       f,
 		Broker:   f,
@@ -20,7 +20,7 @@ func TestSupervisorStartsNamespaceMountBrokerAndChildInOrder(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	want := []string{"ssh", "namespace", "fuse", "broker", "child"}
+	want := []string{"backend", "namespace", "fuse", "broker", "child"}
 	if !reflect.DeepEqual(f.calls, want) {
 		t.Fatalf("call order = %#v, want %#v", f.calls, want)
 	}
@@ -29,7 +29,7 @@ func TestSupervisorStartsNamespaceMountBrokerAndChildInOrder(t *testing.T) {
 func TestSupervisorRunsPathStubsBetweenFuseAndBroker(t *testing.T) {
 	f := &fakeDeps{}
 	s := New(Deps{
-		SSH:       f,
+		Backend:   f,
 		NS:        f,
 		FS:        f,
 		PathStubs: f,
@@ -41,7 +41,7 @@ func TestSupervisorRunsPathStubsBetweenFuseAndBroker(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	want := []string{"ssh", "namespace", "fuse", "pathstubs", "broker", "child"}
+	want := []string{"backend", "namespace", "fuse", "pathstubs", "broker", "child"}
 	if !reflect.DeepEqual(f.calls, want) {
 		t.Fatalf("call order = %#v, want %#v", f.calls, want)
 	}
@@ -51,8 +51,8 @@ type fakeDeps struct {
 	calls []string
 }
 
-func (f *fakeDeps) StartSSH(context.Context) error {
-	f.calls = append(f.calls, "ssh")
+func (f *fakeDeps) StartBackend(context.Context) error {
+	f.calls = append(f.calls, "backend")
 	return nil
 }
 

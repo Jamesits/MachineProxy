@@ -2,18 +2,26 @@ package remoteexec
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
 	"sync"
 
-	"github.com/jamesits/machineproxy/pkg/sshconn"
-	"golang.org/x/crypto/ssh"
+	"github.com/jamesits/machineproxy/pkg/remote"
 )
 
-// SessionProvider creates SSH sessions. Typically satisfied by *sshconn.Manager.
+// SessionProvider creates remote command sessions. Satisfied by any
+// remote.Backend.
 type SessionProvider interface {
-	NewSession(ctx context.Context) (sshconn.Session, error)
+	NewSession(ctx context.Context) (remote.Session, error)
+}
+
+// ExitCoder is satisfied by errors that carry a remote process exit
+// code. Backend session adapters wrap their native error type (e.g.
+// *ssh.ExitError) so the runner doesn't need backend-specific imports.
+type ExitCoder interface {
+	ExitStatus() int
 }
 
 type SSHRunner struct {
@@ -83,8 +91,9 @@ func (r *SSHRunner) Run(ctx context.Context, req Request, stdin io.Reader, stdou
 		return 0, nil
 	}
 
-	if exitErr, ok := waitErr.(*ssh.ExitError); ok {
-		return exitErr.ExitStatus(), nil
+	var ec ExitCoder
+	if errors.As(waitErr, &ec) {
+		return ec.ExitStatus(), nil
 	}
 
 	return 127, waitErr

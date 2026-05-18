@@ -1,3 +1,5 @@
+//go:build backend_ssh
+
 package broker
 
 import (
@@ -8,8 +10,8 @@ import (
 	"testing"
 	"time"
 
+	remotessh "github.com/jamesits/machineproxy/pkg/remote/ssh"
 	"github.com/jamesits/machineproxy/pkg/remoteexec"
-	"github.com/jamesits/machineproxy/pkg/sshconn"
 )
 
 func testBrokerServer(t *testing.T) *Server {
@@ -21,29 +23,21 @@ func testBrokerServer(t *testing.T) *Server {
 	}
 	user := os.Getenv("MPROXY_TEST_SSH_USER")
 
-	dialer, err := sshconn.NewDialer(sshconn.DialConfig{
-		Host:    host,
-		User:    user,
-		Timeout: 5 * time.Second,
+	backend, err := remotessh.New(remotessh.Config{
+		Host:           host,
+		User:           user,
+		ConnectTimeout: 5 * time.Second,
 	})
 	if err != nil {
-		t.Fatalf("NewDialer: %v", err)
+		t.Fatalf("ssh.New: %v", err)
 	}
-
-	mgr := sshconn.NewManager(sshconn.Options{
-		Dial:              dialer.Dial,
-		ReconnectInterval: 500 * time.Millisecond,
-	})
 	ctx := context.Background()
-	if err := mgr.Start(ctx); err != nil {
-		t.Fatalf("Manager.Start: %v", err)
+	if err := backend.Start(ctx); err != nil {
+		t.Fatalf("backend.Start: %v", err)
 	}
-	if !mgr.IsConnected() {
-		t.Fatalf("Manager not connected: %v", mgr.LastErr())
-	}
-	t.Cleanup(func() { _ = mgr.Close() })
+	t.Cleanup(func() { _ = backend.Close() })
 
-	runner := &remoteexec.SSHRunner{Provider: mgr}
+	runner := &remoteexec.SSHRunner{Provider: backend}
 	return NewServer(Deps{Remote: runner})
 }
 

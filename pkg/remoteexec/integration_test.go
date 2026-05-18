@@ -1,3 +1,5 @@
+//go:build backend_ssh
+
 package remoteexec
 
 import (
@@ -9,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jamesits/machineproxy/pkg/sshconn"
+	remotessh "github.com/jamesits/machineproxy/pkg/remote/ssh"
 )
 
 func testSSHRunner(t *testing.T) (*SSHRunner, func()) {
@@ -21,29 +23,22 @@ func testSSHRunner(t *testing.T) (*SSHRunner, func()) {
 	}
 	user := os.Getenv("MPROXY_TEST_SSH_USER")
 
-	dialer, err := sshconn.NewDialer(sshconn.DialConfig{
-		Host:    host,
-		User:    user,
-		Timeout: 5 * time.Second,
+	backend, err := remotessh.New(remotessh.Config{
+		Host:           host,
+		User:           user,
+		ConnectTimeout: 5 * time.Second,
 	})
 	if err != nil {
-		t.Fatalf("NewDialer: %v", err)
+		t.Fatalf("ssh.New: %v", err)
 	}
 
 	ctx := context.Background()
-	mgr := sshconn.NewManager(sshconn.Options{
-		Dial:              dialer.Dial,
-		ReconnectInterval: 500 * time.Millisecond,
-	})
-	if err := mgr.Start(ctx); err != nil {
-		t.Fatalf("Manager.Start: %v", err)
-	}
-	if !mgr.IsConnected() {
-		t.Fatalf("Manager not connected: %v", mgr.LastErr())
+	if err := backend.Start(ctx); err != nil {
+		t.Fatalf("backend.Start: %v", err)
 	}
 
-	runner := &SSHRunner{Provider: mgr}
-	return runner, func() { _ = mgr.Close() }
+	runner := &SSHRunner{Provider: backend}
+	return runner, func() { _ = backend.Close() }
 }
 
 func TestIntegrationRunEchoCommand(t *testing.T) {

@@ -2,8 +2,10 @@ package agentproto
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 )
 
 // StreamHandler receives data and EOF events for a single stream ID.
@@ -38,6 +40,13 @@ type Mux struct {
 	onExit   func(code int, errStr string)
 	onError  func(errStr string)
 	onLog    func(*LogEntry)
+	onFileOp func(*FileOpReq) *FileOpResp
+
+	// File-op RPC state. nextReqID is allocated atomically; pending
+	// maps in-flight ReqIDs to the channel waiting for the response.
+	nextReqID atomic.Uint32
+	pendingMu sync.Mutex
+	pending   map[uint32]chan *FileOpResp
 
 	recorder  *Recorder
 	recSeqNum uint32
@@ -66,6 +75,86 @@ func (m *Mux) OnSignal(fn func(int)) { m.onSignal = fn }
 
 // OnLog sets the callback for FrameLog messages (agent log forwarding).
 func (m *Mux) OnLog(fn func(*LogEntry)) { m.onLog = fn }
+
+// OnFileOp registers the agent-side handler that services file-op
+// requests. The handler receives the request and must return a fully
+// populated FileOpResp (ReqID is propagated automatically).
+func (m *Mux) OnFileOp(fn func(*FileOpReq) *FileOpResp) { m.onFileOp = fn }
+
+// FileOp performs a client-side file-op RPC: encodes req with a fresh
+// ReqID, sends it, and waits for the matching FileOpResp. Multiple
+// FileOp calls are safe concurrently.
+func (m *Mux) FileOp(ctx context.Context, req *FileOpReq) (*FileOpResp, error) {
+	if req == nil {
+		return nil, fmt.Errorf("agentproto: FileOp request is nil")
+	}
+	// 0 is reserved for "uninitialised"; start from 1.
+	for {
+		id := m.nextReqID.Add(1)
+		if id != 0 {
+			req.ReqID = id
+			break
+		}
+	}
+	ch := make(chan *FileOpResp, 1)
+	m.pendingMu.Lock()
+	if m.pending == nil {
+		m.pending = make(map[uint32]chan *FileOpResp)
+	}
+	m.pending[req.ReqID] = ch
+	m.pendingMu.Unlock()
+	defer func() {
+		m.pendingMu.Lock()
+		delete(m.pending, req.ReqID)
+		m.pendingMu.Unlock()
+	}()
+	if err := m.Send(&Frame{Type: FrameFileOp, FileOp: req}); err != nil {
+		return nil, err
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case resp, ok := <-ch:
+		if !ok || resp == nil {
+			return nil, io.ErrUnexpectedEOF
+		}
+		return resp, nil
+	}
+}
+
+// deliverFileResp routes an incoming FileOpResp to the waiting caller.
+// Drops the frame silently when nobody is waiting (e.g. response
+// arriving after FileOp was cancelled by its context).
+func (m *Mux) deliverFileResp(resp *FileOpResp) {
+	if resp == nil {
+		return
+	}
+	m.pendingMu.Lock()
+	ch, ok := m.pending[resp.ReqID]
+	if ok {
+		delete(m.pending, resp.ReqID)
+	}
+	m.pendingMu.Unlock()
+	if !ok {
+		return
+	}
+	select {
+	case ch <- resp:
+	default:
+	}
+}
+
+// failPending closes out all in-flight FileOp calls. Used when the read
+// loop terminates so blocked callers don't hang forever.
+func (m *Mux) failPending() {
+	m.pendingMu.Lock()
+	pending := m.pending
+	m.pending = nil
+	m.pendingMu.Unlock()
+	for _, ch := range pending {
+		close(ch)
+	}
+}
 
 // SetRecorder enables recording of all frames passing through this mux.
 // seq is the command sequence number assigned by the Recorder.
@@ -105,6 +194,7 @@ func (m *Mux) DecodeOne() (*Frame, error) {
 // without one.
 func (m *Mux) ReadLoop(ctx context.Context) (exitCode int, err error) {
 	exitCode = -1
+	defer m.failPending()
 	for {
 		if ctx.Err() != nil {
 			return exitCode, ctx.Err()
@@ -161,6 +251,23 @@ func (m *Mux) ReadLoop(ctx context.Context) (exitCode int, err error) {
 		case FrameLog:
 			if m.onLog != nil && f.Log != nil {
 				m.onLog(f.Log)
+			}
+
+		case FrameFileOp:
+			// Agent-side: service the request and send the response.
+			if m.onFileOp != nil && f.FileOp != nil {
+				resp := m.onFileOp(f.FileOp)
+				if resp == nil {
+					resp = &FileOpResp{}
+				}
+				resp.ReqID = f.FileOp.ReqID
+				_ = m.Send(&Frame{Type: FrameFileResp, FileResp: resp})
+			}
+
+		case FrameFileResp:
+			// Client-side: hand the response to the waiting caller.
+			if f.FileResp != nil {
+				m.deliverFileResp(f.FileResp)
 			}
 		}
 	}

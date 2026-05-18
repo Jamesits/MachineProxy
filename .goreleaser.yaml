@@ -30,6 +30,12 @@ builds:
     id: machineproxy
     main: ./cmd/machineproxy
     binary: machineproxy
+    # Backend implementations are gated by per-backend build tags so
+    # downstream packagers can ship a stripped binary if they want.
+    # Defaults compile everything in.
+    tags:
+      - backend_ssh
+      - backend_docker
 
   - <<: *build-defaults
     skip: false

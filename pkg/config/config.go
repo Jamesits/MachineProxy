@@ -70,6 +70,9 @@ type Config struct {
 	LogLevel string `yaml:"log_level" toml:"log_level" json:"log_level"` // trace, debug, info, warn, error
 
 	Remote struct {
+		// Type selects the backend implementation: "ssh" (default) or
+		// "docker". The CLI --backend flag overrides this when set.
+		Type string `yaml:"type" toml:"type" json:"type"`
 		// SSH is resolved via the user's ssh_config (see ssh_config(5)).
 		// Host accepts either a literal hostname/IP or a Host alias defined
 		// in ~/.ssh/config; User and Port, when set, override the resolved
@@ -79,6 +82,12 @@ type Config struct {
 			User string `yaml:"user" toml:"user" json:"user"`
 			Port int    `yaml:"port" toml:"port" json:"port"`
 		} `yaml:"ssh" toml:"ssh" json:"ssh"`
+		// Docker selects a running container by name or ID. Host (when
+		// set) overrides the DOCKER_HOST env var for this invocation.
+		Docker struct {
+			Container string `yaml:"container" toml:"container" json:"container"`
+			Host      string `yaml:"host" toml:"host" json:"host"`
+		} `yaml:"docker" toml:"docker" json:"docker"`
 		OS   string `yaml:"os" toml:"os" json:"os"`       // remote OS for agent binary resolution; defaults to runtime.GOOS
 		Arch string `yaml:"arch" toml:"arch" json:"arch"` // remote arch for agent binary resolution; defaults to runtime.GOARCH
 	} `yaml:"remote" toml:"remote" json:"remote"`
@@ -134,6 +143,9 @@ type Config struct {
 func (c *Config) applyDefaults() error {
 	if c.LogLevel == "" {
 		c.LogLevel = "info"
+	}
+	if c.Remote.Type == "" {
+		c.Remote.Type = "ssh"
 	}
 	if c.Remote.OS == "" {
 		c.Remote.OS = runtime.GOOS
@@ -223,11 +235,20 @@ func (c *Config) Validate() error {
 	default:
 		return fmt.Errorf("log_level must be one of trace, debug, info, warn, error; got %q", c.LogLevel)
 	}
-	if c.Remote.SSH.Host == "" {
-		return errors.New("remote.ssh.host is required")
-	}
-	if c.Remote.SSH.Port < 0 || c.Remote.SSH.Port > 65535 {
-		return fmt.Errorf("remote.ssh.port must be between 0 and 65535; got %d", c.Remote.SSH.Port)
+	switch c.Remote.Type {
+	case "ssh":
+		if c.Remote.SSH.Host == "" {
+			return errors.New("remote.ssh.host is required when remote.type=ssh")
+		}
+		if c.Remote.SSH.Port < 0 || c.Remote.SSH.Port > 65535 {
+			return fmt.Errorf("remote.ssh.port must be between 0 and 65535; got %d", c.Remote.SSH.Port)
+		}
+	case "docker":
+		if c.Remote.Docker.Container == "" {
+			return errors.New("remote.docker.container is required when remote.type=docker")
+		}
+	default:
+		return fmt.Errorf("remote.type must be one of ssh, docker; got %q", c.Remote.Type)
 	}
 	if len(c.Container.Mounts) == 0 {
 		return errors.New("container.mounts must not be empty")

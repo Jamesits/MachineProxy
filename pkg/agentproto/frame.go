@@ -14,22 +14,26 @@ const (
 	FrameConfig    FrameType = 8  // local → agent: serialized config
 	FramePathQuery FrameType = 9  // local → agent: enumerate PATH executables
 	FramePathInfo  FrameType = 10 // agent → local: PATH enumeration result
+	FrameFileOp    FrameType = 11 // local → agent: file-op request
+	FrameFileResp  FrameType = 12 // agent → local: file-op response
 )
 
 // Frame is a single message on the CBOR mux. Fields are omitted when
 // zero-valued so only the relevant subset appears on the wire.
 type Frame struct {
-	Type   FrameType    `cbor:"t"`
-	Stream uint32       `cbor:"s,omitempty"` // 0=stdin, 1=stdout, 2=stderr, 3+=extra fds
-	Data   []byte       `cbor:"d,omitempty"`
-	Signal int          `cbor:"sig,omitempty"`
-	Code   int          `cbor:"c,omitempty"`
-	Error  string       `cbor:"e,omitempty"`
-	Exec   *ExecMsg     `cbor:"x,omitempty"`
-	Log    *LogEntry    `cbor:"l,omitempty"`
-	Config *AgentConfig `cbor:"cfg,omitempty"`
-	Query  *PathQuery   `cbor:"q,omitempty"`
-	Info   *PathInfo    `cbor:"i,omitempty"`
+	Type     FrameType    `cbor:"t"`
+	Stream   uint32       `cbor:"s,omitempty"` // 0=stdin, 1=stdout, 2=stderr, 3+=extra fds
+	Data     []byte       `cbor:"d,omitempty"`
+	Signal   int          `cbor:"sig,omitempty"`
+	Code     int          `cbor:"c,omitempty"`
+	Error    string       `cbor:"e,omitempty"`
+	Exec     *ExecMsg     `cbor:"x,omitempty"`
+	Log      *LogEntry    `cbor:"l,omitempty"`
+	Config   *AgentConfig `cbor:"cfg,omitempty"`
+	Query    *PathQuery   `cbor:"q,omitempty"`
+	Info     *PathInfo    `cbor:"i,omitempty"`
+	FileOp   *FileOpReq   `cbor:"fop,omitempty"`
+	FileResp *FileOpResp  `cbor:"frp,omitempty"`
 }
 
 // LogEntry carries a structured log record from the agent.
@@ -76,4 +80,73 @@ type PathInfoEntry struct {
 // order as the input Paths.
 type PathInfo struct {
 	Entries []PathInfoEntry `cbor:"entries"`
+}
+
+// FileOp identifies a remote file operation. Operations are RPC-style:
+// the caller assigns a unique ReqID and expects exactly one FileOpResp
+// back with the same ReqID. File handles are agent-side state; the
+// client treats them as opaque uint32 tokens returned by Open/Create.
+type FileOp uint8
+
+const (
+	FileOpOpen     FileOp = 1  // input: Path, Flags  → output: Handle
+	FileOpCreate   FileOp = 2  // input: Path         → output: Handle (O_WRONLY|O_CREATE|O_TRUNC)
+	FileOpOpenFile FileOp = 3  // input: Path, Flags  → output: Handle
+	FileOpClose    FileOp = 4  // input: Handle
+	FileOpReadAt   FileOp = 5  // input: Handle, Offset, Size  → output: Data, EOF
+	FileOpWriteAt  FileOp = 6  // input: Handle, Offset, Data  → output: Size (bytes written)
+	FileOpStat     FileOp = 7  // input: Path → output: Stat
+	FileOpReadDir  FileOp = 8  // input: Path → output: Entries
+	FileOpMkdir    FileOp = 9  // input: Path
+	FileOpMkdirAll FileOp = 10 // input: Path
+	FileOpRemove   FileOp = 11 // input: Path
+	FileOpRename   FileOp = 12 // input: Path, NewPath
+	FileOpChmod    FileOp = 13 // input: Path, Mode
+	FileOpTruncate FileOp = 14 // input: Path, Size
+	FileOpGetwd    FileOp = 15 //             → output: Path
+)
+
+// FileOpReq is the request half of a file-op RPC. Only fields relevant
+// to the chosen Op should be set.
+type FileOpReq struct {
+	ReqID   uint32 `cbor:"id"`
+	Op      FileOp `cbor:"op"`
+	Path    string `cbor:"p,omitempty"`
+	NewPath string `cbor:"np,omitempty"`
+	Flags   int32  `cbor:"fl,omitempty"`
+	Mode    uint32 `cbor:"mo,omitempty"`
+	Handle  uint32 `cbor:"h,omitempty"`
+	Offset  int64  `cbor:"of,omitempty"`
+	Size    int64  `cbor:"sz,omitempty"`
+	Data    []byte `cbor:"d,omitempty"`
+}
+
+// FileOpResp is the response half. Errno (when nonzero) is a POSIX
+// errno value the client maps back to an os.Err* sentinel; ErrMsg is a
+// human-readable description for logs.
+type FileOpResp struct {
+	ReqID   uint32         `cbor:"id"`
+	Errno   uint32         `cbor:"er,omitempty"`
+	ErrMsg  string         `cbor:"em,omitempty"`
+	Handle  uint32         `cbor:"h,omitempty"`
+	Data    []byte         `cbor:"d,omitempty"`
+	N       int64          `cbor:"n,omitempty"`   // bytes read/written
+	EOF     bool           `cbor:"eof,omitempty"` // for ReadAt
+	Path    string         `cbor:"p,omitempty"`   // for Getwd
+	Stat    *FileStat      `cbor:"st,omitempty"`
+	Entries []FileDirEntry `cbor:"en,omitempty"`
+}
+
+// FileStat is a backend-agnostic snapshot of os.FileInfo fields.
+type FileStat struct {
+	Name       string `cbor:"n"`
+	Size       int64  `cbor:"s"`
+	Mode       uint32 `cbor:"m"`
+	MTimeNanos int64  `cbor:"t,omitempty"`
+	IsDir      bool   `cbor:"d,omitempty"`
+}
+
+// FileDirEntry is one entry in a FileOpReadDir response.
+type FileDirEntry struct {
+	Stat FileStat `cbor:"st"`
 }

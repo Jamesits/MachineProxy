@@ -88,8 +88,33 @@ func run() int {
 		return 0
 	}
 
+	// File-op service mode: handle file-op requests until stdin EOF.
+	// Used by the Docker backend's long-lived FUSE worker.
+	if f.Type == agentproto.FrameFileOp {
+		server := agentproto.NewFileOpServer()
+		defer server.CloseAll()
+		mux.OnFileOp(server.Handle)
+		// Process the first request (already decoded) before handing
+		// the read loop the remaining stream.
+		if f.FileOp != nil {
+			resp := server.Handle(f.FileOp)
+			if resp == nil {
+				resp = &agentproto.FileOpResp{}
+			}
+			resp.ReqID = f.FileOp.ReqID
+			if err := mux.Send(&agentproto.Frame{Type: agentproto.FrameFileResp, FileResp: resp}); err != nil {
+				log.Error("send file-op response failed", "error", err)
+				return 127
+			}
+		}
+		if _, err := mux.ReadLoop(ctx); err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
+			log.Warn("file-op read loop ended with error", "error", err)
+		}
+		return 0
+	}
+
 	if f.Type != agentproto.FrameExec || f.Exec == nil {
-		log.Error("expected exec or path-query frame", "type", f.Type)
+		log.Error("expected exec, path-query or file-op frame", "type", f.Type)
 		return 127
 	}
 
