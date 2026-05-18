@@ -88,6 +88,19 @@ Common CLI-based AI coding agents assume they are running on the same device as 
 
 This program aims to work around these problems.
 
+### Why not tell the AI agent to just use SSH?
+
+MachineProxy pros:
+
+- `@file` works
+- All native tools (read/write files, searching, execute program or bash, etc.) work as intended
+- Harness-local file/code indexing works as intended
+- Local executables can call remote executables, and they can pipe data between them
+
+"Just use SSH" pros:
+
+- Broader compatibility
+
 ### How
 
 The program is launched with a quasi-remote environment.
@@ -95,7 +108,7 @@ The program is launched with a quasi-remote environment.
 - The workspace is mounted with FUSE over SFTP
 - Child processes are intercepted and launched over SSH
 
-### Compatibility
+### Compatibility, or how good is it
 
 MachineProxy supports Linux only, for both local and remote devices. Golang runtime requires Linux 3.2 or later; [support differs on different architectures](https://go.dev/wiki/MinimumRequirements#linuxlinux).
 
