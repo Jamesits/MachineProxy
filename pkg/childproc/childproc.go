@@ -18,9 +18,15 @@ type Spec struct {
 	Cwd      string
 	ExtraFDs []uint32
 
-	// DropSudoCredentials, when true, instructs Build to switch the
-	// child's uid/gid to the values in $SUDO_UID / $SUDO_GID if those
-	// variables are set. Unix-only; ignored on Windows.
+	// DropSudoCredentials, when true, instructs Build to launch the
+	// child with reduced privileges if the current process is running
+	// with elevated ones:
+	//   - On unix, switch the child's uid/gid to the values in
+	//     $SUDO_UID / $SUDO_GID if those variables are set.
+	//   - On Windows, if the current process token is elevated (UAC
+	//     "split token" admin), launch the child with the linked
+	//     filtered (standard-user) token. If the current token is not
+	//     elevated, this is a no-op.
 	DropSudoCredentials bool
 }
 
