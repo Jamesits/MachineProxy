@@ -307,6 +307,150 @@ func TestParseMountRejectsRelative(t *testing.T) {
 	}
 }
 
+func TestParseMountExpandsLocalTilde(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		t.Skip("no home dir available")
+	}
+	m, err := ParseMount("~/work:/remote/work")
+	if err != nil {
+		t.Fatalf("ParseMount() error = %v", err)
+	}
+	wantLocal := filepath.Join(home, "work")
+	if m.ContainerPath != wantLocal {
+		t.Fatalf("ContainerPath = %q, want %q", m.ContainerPath, wantLocal)
+	}
+	if m.RemotePath != "/remote/work" {
+		t.Fatalf("RemotePath = %q, want unchanged absolute", m.RemotePath)
+	}
+}
+
+func TestParseMountKeepsRemoteTildeRaw(t *testing.T) {
+	m, err := ParseMount("/local/work:~/remote-home/work")
+	if err != nil {
+		t.Fatalf("ParseMount() error = %v", err)
+	}
+	if m.ContainerPath != "/local/work" {
+		t.Fatalf("ContainerPath = %q, want unchanged absolute", m.ContainerPath)
+	}
+	if m.RemotePath != "~/remote-home/work" {
+		t.Fatalf("RemotePath = %q, want raw ~/... form", m.RemotePath)
+	}
+}
+
+func TestParseMountSingleTildePath(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		t.Skip("no home dir available")
+	}
+	m, err := ParseMount("~/workspace")
+	if err != nil {
+		t.Fatalf("ParseMount() error = %v", err)
+	}
+	wantLocal := filepath.Join(home, "workspace")
+	if m.ContainerPath != wantLocal {
+		t.Fatalf("ContainerPath = %q, want %q", m.ContainerPath, wantLocal)
+	}
+	if m.RemotePath != "~/workspace" {
+		t.Fatalf("RemotePath = %q, want raw ~/workspace", m.RemotePath)
+	}
+}
+
+func TestExpandRemoteHome(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		home string
+		want string
+		err  bool
+	}{
+		{"absolute path unchanged", "/foo/bar", "/home/u", "/foo/bar", false},
+		{"empty unchanged", "", "/home/u", "", false},
+		{"tilde alone", "~", "/home/u", "/home/u", false},
+		{"tilde slash", "~/foo", "/home/u", "/home/u/foo", false},
+		{"tilde nested", "~/a/b/c", "/home/u", "/home/u/a/b/c", false},
+		{"empty home errors", "~/foo", "", "", true},
+		{"middle tilde unchanged", "/foo/~/bar", "/home/u", "/foo/~/bar", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ExpandRemoteHome(tc.in, tc.home)
+			if tc.err {
+				if err == nil {
+					t.Fatalf("expected error, got %q", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestExpandLocalHomePassthrough(t *testing.T) {
+	got, err := ExpandLocalHome("/already/absolute")
+	if err != nil {
+		t.Fatalf("ExpandLocalHome() error = %v", err)
+	}
+	if got != "/already/absolute" {
+		t.Fatalf("got %q, want unchanged", got)
+	}
+}
+
+func TestLoadExpandsLocalPathsInConfig(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		t.Skip("no home dir available")
+	}
+	raw := `
+remote:
+  ssh:
+    host: 127.0.0.1
+    user: dev
+container:
+  local_commands:
+    - /usr/bin/env
+  mounts:
+    - /workspace
+  working_dir: ~/proj
+  path_stub_dir: ~/.cache/stub
+components:
+  shim_path: ~/bin/mproxy-shim
+  tracer_path: ~/bin/mproxy-tracer
+  agent_local_path: ~/bin/mproxy-agent
+  agent_remote_path: ~/remote/mproxy-agent
+recording:
+  path: ~/recordings/session
+`
+	cfg, err := Load(strings.NewReader(raw))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	for _, c := range []struct {
+		name, got, want string
+	}{
+		{"working_dir", cfg.Container.WorkingDir, filepath.Join(home, "proj")},
+		{"path_stub_dir", cfg.Container.PathStubDir, filepath.Join(home, ".cache/stub")},
+		{"shim_path", cfg.Components.ShimPath, filepath.Join(home, "bin/mproxy-shim")},
+		{"tracer_path", cfg.Components.TracerPath, filepath.Join(home, "bin/mproxy-tracer")},
+		{"agent_local_path", cfg.Components.AgentLocalPath, filepath.Join(home, "bin/mproxy-agent")},
+		{"recording.path", cfg.Recording.Path, filepath.Join(home, "recordings/session")},
+	} {
+		if c.got != c.want {
+			t.Errorf("%s = %q, want %q", c.name, c.got, c.want)
+		}
+	}
+	// AgentRemotePath must stay tilde-prefixed for SFTP-time expansion.
+	if cfg.Components.AgentRemotePath != "~/remote/mproxy-agent" {
+		t.Errorf("agent_remote_path = %q, want raw ~/remote/mproxy-agent",
+			cfg.Components.AgentRemotePath)
+	}
+}
+
 func TestParseMountRejectsEmpty(t *testing.T) {
 	_, err := ParseMount("")
 	if err == nil {

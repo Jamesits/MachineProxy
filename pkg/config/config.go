@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -22,26 +23,46 @@ type Mount struct {
 }
 
 // ParseMount parses a docker-compose style mount string.
+//
+// Either side may start with "~" or "~/"; the local side is expanded
+// against the local user's home immediately so the resulting ContainerPath
+// is always absolute. The remote side is returned in its raw form (still
+// possibly "~/..."), to be expanded against the remote user's home at
+// SFTP-use time — see ExpandRemoteHome.
 func ParseMount(s string) (Mount, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return Mount{}, errors.New("mount entry must not be empty")
 	}
+	var local, remote string
 	if i := strings.Index(s, ":"); i >= 0 {
-		local := s[:i]
-		remote := s[i+1:]
+		local = s[:i]
+		remote = s[i+1:]
 		if local == "" || remote == "" {
 			return Mount{}, fmt.Errorf("invalid mount %q: both local and remote paths are required around ':'", s)
 		}
-		if !filepath.IsAbs(local) || !filepath.IsAbs(remote) {
-			return Mount{}, fmt.Errorf("mount paths must be absolute: %q", s)
-		}
-		return Mount{RemotePath: remote, ContainerPath: local}, nil
+	} else {
+		local = s
+		remote = s
 	}
-	if !filepath.IsAbs(s) {
-		return Mount{}, fmt.Errorf("mount path must be absolute: %q", s)
+	if !isAbsOrHomeRelative(local) {
+		return Mount{}, fmt.Errorf("mount local path must be absolute or start with ~: %q", s)
 	}
-	return Mount{RemotePath: s, ContainerPath: s}, nil
+	if !isAbsOrHomeRelative(remote) {
+		return Mount{}, fmt.Errorf("mount remote path must be absolute or start with ~: %q", s)
+	}
+	expandedLocal, err := ExpandLocalHome(local)
+	if err != nil {
+		return Mount{}, fmt.Errorf("expand local mount path %q: %w", local, err)
+	}
+	return Mount{RemotePath: remote, ContainerPath: expandedLocal}, nil
+}
+
+// isAbsOrHomeRelative reports whether p is a valid path-like string
+// that ParseMount and Validate will accept: either an OS-absolute path
+// or a "~"/"~/..." home-relative path.
+func isAbsOrHomeRelative(p string) bool {
+	return filepath.IsAbs(p) || p == "~" || strings.HasPrefix(p, "~/")
 }
 
 // Config describes machineproxy runtime behavior.
@@ -124,10 +145,29 @@ func (c *Config) applyDefaults() error {
 	if c.Container.PathStubDir == "" {
 		c.Container.PathStubDir = defaultPathStubDir()
 	}
-	if expanded, err := expandLocalHome(c.Container.PathStubDir); err == nil {
-		c.Container.PathStubDir = expanded
-	} else {
-		return fmt.Errorf("container.path_stub_dir: %w", err)
+	// Expand all local-side path fields up front so downstream consumers
+	// only ever see absolute paths. Remote-side fields (AgentRemotePath,
+	// Container.Mounts remote half) keep their "~/..." form here and are
+	// expanded against the remote user's home at SFTP-use time.
+	for _, f := range []struct {
+		name string
+		ptr  *string
+	}{
+		{"container.path_stub_dir", &c.Container.PathStubDir},
+		{"container.working_dir", &c.Container.WorkingDir},
+		{"components.shim_path", &c.Components.ShimPath},
+		{"components.tracer_path", &c.Components.TracerPath},
+		{"components.agent_local_path", &c.Components.AgentLocalPath},
+		{"recording.path", &c.Recording.Path},
+	} {
+		if *f.ptr == "" {
+			continue
+		}
+		expanded, err := ExpandLocalHome(*f.ptr)
+		if err != nil {
+			return fmt.Errorf("%s: %w", f.name, err)
+		}
+		*f.ptr = expanded
 	}
 	if len(c.Agent.EnvKeep) == 0 {
 		c.Agent.EnvKeep = []string{
@@ -214,10 +254,10 @@ func defaultPathStubDir() string {
 	return "/tmp/machineproxy/pathstub"
 }
 
-// expandLocalHome resolves a leading "~" or "~/" against the local
+// ExpandLocalHome resolves a leading "~" or "~/" against the local
 // user's home directory. Other paths are returned unchanged. Returns
 // an error only if "~" is used but the home dir cannot be looked up.
-func expandLocalHome(p string) (string, error) {
+func ExpandLocalHome(p string) (string, error) {
 	if p != "~" && !strings.HasPrefix(p, "~/") {
 		return p, nil
 	}
@@ -232,6 +272,26 @@ func expandLocalHome(p string) (string, error) {
 		return home, nil
 	}
 	return filepath.Join(home, p[2:]), nil
+}
+
+// ExpandRemoteHome resolves a leading "~" or "~/" against remoteHome
+// (typically the SFTP server's default working directory). Other paths
+// are returned unchanged. SFTP servers do not expand "~" themselves and
+// session.Start single-quotes its argument, so this rewrite must happen
+// client-side before any remote use.
+func ExpandRemoteHome(p, remoteHome string) (string, error) {
+	if p != "~" && !strings.HasPrefix(p, "~/") {
+		return p, nil
+	}
+	if remoteHome == "" {
+		return "", errors.New("expand ~: remote home directory is empty")
+	}
+	if p == "~" {
+		return remoteHome, nil
+	}
+	// path.Join (POSIX) — remote paths are SFTP/POSIX-style regardless
+	// of the local OS.
+	return path.Join(remoteHome, p[2:]), nil
 }
 
 // LocalCommandRule is a compiled local_commands entry that can match

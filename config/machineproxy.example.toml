@@ -48,10 +48,15 @@ env_remove = [
 # Path proxy: mount a FUSE directory containing one stub per remote-PATH
 # executable, and splice it into the container's PATH. Exec'ing a stub
 # transparently runs the corresponding binary on the remote machine.
+# This only affects `PATH` lookup and is intended for shell autocompletion
+# to work correctly; during `exec` the rules in `local_commands` is used.
 #   "prepend"  — stubs win over locally-installed binaries (default)
 #   "append"   — local binaries win; stubs only fill gaps
 #   "disabled" — skip enumeration entirely
-path_proxy = "prepend"
+# path_proxy = "prepend"
+
+
+# [agent]
 
 # Agent env filtering controls which variables are forwarded to the remote.
 # Env vars added or changed by the parent process (after the hook is loaded)
@@ -59,8 +64,6 @@ path_proxy = "prepend"
 # env_keep patterns are sent; any matching env_remove are always stripped.
 # env_remove takes priority over env_keep.
 # Patterns are globs (filepath.Match syntax) or /regex/ delimited.
-#
-# [agent]
 # env_keep = [
 #     "HOME",
 #     "PATH",

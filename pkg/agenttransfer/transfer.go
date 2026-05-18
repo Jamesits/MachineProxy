@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/jamesits/machineproxy/pkg/config"
 	"github.com/jamesits/machineproxy/pkg/logging"
 	"github.com/pkg/sftp"
 )
@@ -154,7 +155,8 @@ func (t *Transferer) Ensure() (string, error) {
 }
 
 // expandRemoteHome resolves a leading "~" or "~/" against the SFTP
-// server's working directory. Other paths are returned unchanged.
+// server's working directory. Other paths are returned unchanged
+// without a Getwd round-trip.
 func expandRemoteHome(client remoteFileClient, p string) (string, error) {
 	if p != "~" && !strings.HasPrefix(p, "~/") {
 		return p, nil
@@ -163,13 +165,7 @@ func expandRemoteHome(client remoteFileClient, p string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if home == "" {
-		return "", fmt.Errorf("remote home directory unknown")
-	}
-	if p == "~" {
-		return home, nil
-	}
-	return path.Join(home, p[2:]), nil
+	return config.ExpandRemoteHome(p, home)
 }
 
 func (t *Transferer) remoteClient() (remoteFileClient, error) {

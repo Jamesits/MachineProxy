@@ -50,6 +50,11 @@ type runtimeDeps struct {
 	pathStubMountDir string
 	stubEntries      map[string]pathstub.Entry
 
+	// workspaceMount holds the first container mount with its
+	// RemotePath already expanded against the remote user's home.
+	// Populated by MountWorkspace and consumed by StartBroker/RunChild.
+	workspaceMount config.Mount
+
 	brokerCtxCancel context.CancelFunc
 }
 
@@ -176,13 +181,26 @@ func (d *runtimeDeps) MountWorkspace(ctx context.Context) error {
 		return fmt.Errorf("parse workspace mount: %w", err)
 	}
 
-	d.log.Log(ctx, logging.LevelTrace, "mounting workspace", "remote_path", mount.RemotePath)
-
 	raw := d.sshManager.SFTP()
 	sftpClient, ok := raw.(*sftp.Client)
 	if !ok {
 		return fmt.Errorf("ssh sftp client is not *sftp.Client")
 	}
+
+	// Resolve a possibly home-relative remote path against the SFTP
+	// server's working dir (typically the remote user's home).
+	remoteHome, err := sftpClient.Getwd()
+	if err != nil {
+		return fmt.Errorf("get remote home dir for mount expansion: %w", err)
+	}
+	resolvedRemote, err := config.ExpandRemoteHome(mount.RemotePath, remoteHome)
+	if err != nil {
+		return fmt.Errorf("expand remote mount path %q: %w", mount.RemotePath, err)
+	}
+	mount.RemotePath = resolvedRemote
+	d.workspaceMount = mount
+
+	d.log.Log(ctx, logging.LevelTrace, "mounting workspace", "remote_path", mount.RemotePath)
 
 	// Verify the remote workspace is reachable up front. Without this check,
 	// FUSE happily mounts an unusable backend and the failure surfaces later
@@ -409,9 +427,10 @@ func (d *runtimeDeps) StartBroker(ctx context.Context) error {
 	// Two prefixes can be rewritten:
 	//   - the workspace mount   (containerPath → remotePath)
 	//   - the path-stub mount   (<stub_dir>/<name> → real remote binary)
-	mount, _ := config.ParseMount(d.cfg.Container.Mounts[0])
-	containerPrefix := mount.ContainerPath
-	remotePrefix := mount.RemotePath
+	// MountWorkspace already resolved the remote half of the workspace
+	// mount against the remote user's home directory.
+	containerPrefix := d.workspaceMount.ContainerPath
+	remotePrefix := d.workspaceMount.RemotePath
 	stubPrefix := d.cfg.Container.PathStubDir
 	stubMap := d.stubEntries // nil when path proxy is disabled or empty
 
@@ -541,8 +560,9 @@ func (d *runtimeDeps) RunChild(ctx context.Context, cmdline []string) error {
 	// Strip env vars that should not leak into the container process.
 	env = envfilter.Remove(env, d.cfg.Container.EnvRemove)
 
-	// Parse the first mount entry for container path binding.
-	mount, _ := config.ParseMount(d.cfg.Container.Mounts[0])
+	// Use the workspace mount's local-side path (already absolute after
+	// ParseMount's tilde expansion) for the container bind target.
+	mount := d.workspaceMount
 
 	// Use explicit working_dir if set, otherwise default to the first mount's local path.
 	workingDir := d.cfg.Container.WorkingDir
