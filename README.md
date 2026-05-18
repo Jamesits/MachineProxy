@@ -122,3 +122,98 @@ VSCode Terminal seems to override `/usr/bin/env node` in some cases, causing som
 ```shell
 machineproxy [other args] /usr/bin/node "$(which amp)" --no-ide
 ```
+
+### Pipe Performance
+
+If you try to pipe things across the machine boundary, the pipe goes through the SSH connection twice. This is the case as long as the process setting up the pipe is run locally, even if both the sender and the receiver runs on the remote machine.
+
+<details>
+  <summary>Claude's explanation</summary>
+
+```
+❯ Validate a thing:
+  When I run bash as the machineproxy entrypoint program, and run `cat xxx |
+  grep yyy` inside the bash, does the pipe content goes roundtrip across the
+  SSH or it is shortcut'd on the remote side
+
+● Answer: Round-trips across SSH. Twice, in fact.
+
+  Here's the actual data path for cat xxx | grep yyy when bash is the target:
+
+  1. Bash runs in the local container. When it sets up the pipe, the pipe FDs
+  are created in the local kernel.
+  2. Bash forks twice. Each child execve's cat/grep. The tracer
+  (pkg/tracer/tracer.go:269-273) intercepts non-whitelisted execs and rewrites
+  them to launch mproxy-shim locally, inheriting the pipe ends as stdin/stdout.
+  3. Each local shim connects to the broker (cmd/mproxy-shim/main.go:41-50),
+  which spawns the real cat/grep on the remote via the agent. The remote child's
+   stdio is connected to socketpairs, muxed back over SSH.
+  4. The shim then byte-pumps between its inherited FDs and the broker
+  connection (streamStdin, streamFD at cmd/mproxy-shim/main.go:168-197).
+
+  So the bytes for cat's output travel:
+
+  remote cat stdout
+    → socketpair (remote)
+    → SSH mux
+    → broker (local)
+    → shim_cat stdout
+    → local kernel pipe          ← the only place cat and grep "meet"
+    → shim_grep stdin
+    → broker (local)
+    → SSH mux
+    → remote grep stdin
+
+  That's two SSH traversals for the pipe content (remote→local, then
+  local→remote), plus a third for grep's output back to the terminal. There is
+  no remote-side shortcut — bash, which owns the pipe, is in the container, so
+  the pipe necessarily exists locally.
+
+  If you want this shortcut'd, the options would be either (a) whitelist
+  cat/grep so they run locally against the FUSE-mounted workspace, or (b) keep
+  the shell remote and only proxy specific operations the other way. The current
+   design pays the round-trip cost as the tradeoff for keeping the shell
+  environment local.
+
+❯ Can we detect this case in the broker (2 remote pipe wants to connect) and
+  let the broker tell the shim to shortcut them?
+
+● Yes, this is detectable, but with a real timing wrinkle. Sketch:
+
+  Detection signal. Two ends of the same pipe share a kernel inode. Each shim
+  can fstat its inherited stdio/extra FDs and report (role, dev, ino, kind=pipe)
+   in the ExecRequest. The broker keeps a short-lived ino → (shim, role) table;
+  when shim_cat's stdout-ino matches shim_grep's stdin-ino, they're paired. No
+  SCM_RIGHTS needed.
+
+  Action. Add a new agent control message: instead of two independent stdio mux
+  streams, tell the agent to create a real pipe() on the remote side and wire it
+   as cat's stdout / grep's stdin. The local kernel pipe between the two shims
+  becomes dormant — both shims just hold their FDs and forward nothing.
+
+  The race. Bash forks all pipeline stages before either execs, so shim arrivals
+   are nearly simultaneous in the common case — but not guaranteed. The broker
+  has to decide: launch cat eagerly (and risk having to replay buffered bytes
+  once grep arrives), or hold cat until its partner shows up (and risk stalling
+  if grep never comes — e.g., backgrounded pipelines, slow forks, weird shells).
+   A bounded delay (~50–100ms or until cat produces its first byte) covers most
+  shell pipelines and degrades gracefully to the current path.
+
+  Edge cases worth thinking about:
+  - One side whitelisted/local — already cheap, skip the shortcut.
+  - tee, <(...) process substitution, coproc, dup'd FDs in scripts — pipes can
+  have >2 endpoints; only shortcut when exactly one writer and one reader claim
+  the inode.
+  - Pipe with data already buffered locally before the match is detected — needs
+   replay across the new remote pipe, or just give up on shortcutting that pair.
+  - Shim ordering — broker must handle either side arriving first.
+
+  Tradeoff. Real win for data-heavy remote pipelines (eliminates 2× SSH hops for
+   the pipe body). Cost is a non-trivial protocol change (shim → broker FD
+  metadata, broker → agent splice command) plus the matching window logic, which
+   is the kind of timing-dependent code that's easy to get subtly wrong. I'd
+  recommend prototyping the detection-only path first (log when a shortcut would
+   apply) to see how often it actually fires in your workloads before committing
+   to the wiring.
+```
+</details>
