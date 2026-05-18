@@ -1,13 +1,13 @@
 # MachineProxy
 
-MachineProxy solves the last-hop problem for your AI agent, even when the target machine is outdated or has no Internet access.
+MachineProxy solves the last-hop problem for your AI agent, even when the target machine is too outdated to install the agent on or has no Internet access.
 
 ![Project Status - Premature](https://img.shields.io/badge/Project_Status-Premature-yellow)
 ![100% AI Code](https://img.shields.io/badge/AI_Code-100%25-blue)
 ![Reviewed by a Human](https://img.shields.io/badge/Reviewed_by-a_Human-green)
 [![Go Reference](https://pkg.go.dev/badge/github.com/jamesits/machineproxy.svg)](https://pkg.go.dev/github.com/jamesits/machineproxy)
 
-MachineProxy creates a mixed-reality environment for your agent, or for any other program. The program itself runs locally, while seeing and acting on another machine over SSH.
+MachineProxy creates a mixed-reality environment for your agent, or for any other program. The program itself runs locally while seeing and acting on another machine over SSH. Harness features and tools work transparently.
 
 ## Usage
 
@@ -28,7 +28,7 @@ host = "192.0.2.2"
 # user = "" # optional
 
 [container]
-# A list of programs that you want to run locally (or unable to install onto the remote device)
+# A list of programs that you want to run locally (or that you cannot install on the remote device)
 local_commands = [
     "amp",
     "codex",
@@ -40,7 +40,7 @@ local_commands = [
     "rg",
 ]
 # A list of remote paths that you want the programs to access
-# The first entry becames the working directory of the launched process
+# The first entry becomes the working directory of the launched process
 mounts = [
     "/path/to/your/workspace",
 ]
@@ -93,8 +93,8 @@ This program aims to work around these problems.
 MachineProxy pros:
 
 - `@file` works
-- All native tools (read/write files, searching, execute program or bash, etc.) work as intended
-- Harness-local file/code indexing works as intended
+- All native tools (read/write files, searching, executing programs or shell commands, etc.) behave normally
+- Harness-local file/code indexing still works
 - Local executables can call remote executables, and they can pipe data between them
 
 "Just use SSH" pros:
@@ -112,7 +112,7 @@ The program is launched with a quasi-remote environment.
 
 MachineProxy supports Linux only, for both local and remote devices. Golang runtime requires Linux 3.2 or later; [support differs on different architectures](https://go.dev/wiki/MinimumRequirements#linuxlinux).
 
-MachineProxy remote agent (`mproxy-agent`) must be compiled in the remote device's architecture. The official packages contains `amd64` (v1) and `arm64` (v8) builds. If you need agents for other architectures or variants, you must compile them yourself. I can't test them due to the availability of hardware, so bugs might exist; bug reports and contributions are welcomed.
+The MachineProxy remote agent (`mproxy-agent`) must be compiled for the remote device's architecture. The official packages contain `amd64` (v1) and `arm64` (v8) builds. If you need agents for other architectures or variants, you must compile them yourself. I can't test those builds because I don't have the hardware, so bugs might exist; bug reports and contributions are welcome.
 
 MachineProxy is designed to work with most programs, including editors and CLI-based AI coding agents. Most use cases are covered, but edge cases exist and some may be impossible to fix completely.
 
@@ -132,7 +132,7 @@ Some shells (`sh`, Bash, etc.) maintain a command cache for quick lookups in `PA
 
 ### VSCode Terminal
 
-VSCode Terminal seems to override `/usr/bin/env node` in some cases, causing some programs, such as [Amp](ampcode.com), to fail to launch. If you are using MachineProxy from a VSCode Terminal, run Node.js programs like this, using `amp` as an example:
+VSCode Terminal seems to override `/usr/bin/env node` in some cases, causing some programs, such as [Amp](https://ampcode.com), to fail to launch. If you are using MachineProxy from a VSCode Terminal, run Node.js programs like this, using `amp` as an example:
 
 ```shell
 machineproxy [...args] /usr/bin/node "$(which amp)" --no-ide

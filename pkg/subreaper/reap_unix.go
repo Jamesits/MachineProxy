@@ -1,4 +1,6 @@
-package main
+//go:build unix
+
+package subreaper
 
 import (
 	"context"
@@ -7,10 +9,11 @@ import (
 	"syscall"
 )
 
-// reapZombies collects zombie child processes. It must be started after
-// prctl(PR_SET_CHILD_SUBREAPER) so that orphaned grandchildren are
-// reparented to this process.
-func reapZombies(ctx context.Context) {
+// Reap collects zombie child processes for the lifetime of ctx. It
+// listens for SIGCHLD and drains all finished children on each tick.
+// When run after Setup it also reaps descendants reparented to us via
+// subreaper / procctl, keeping the process table clean.
+func Reap(ctx context.Context) {
 	sigch := make(chan os.Signal, 8)
 	signal.Notify(sigch, syscall.SIGCHLD)
 	defer signal.Stop(sigch)
@@ -18,8 +21,7 @@ func reapZombies(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			// Drain any remaining zombies before returning.
-			reapAll()
+			reapAll() // final drain
 			return
 		case <-sigch:
 			reapAll()

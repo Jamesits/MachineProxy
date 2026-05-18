@@ -7,11 +7,12 @@ import (
 	"log/slog"
 	"os"
 	"sync"
-	"syscall"
 
 	"github.com/jamesits/machineproxy/pkg/agentproto"
+	"github.com/jamesits/machineproxy/pkg/childproc"
 	"github.com/jamesits/machineproxy/pkg/envfilter"
 	"github.com/jamesits/machineproxy/pkg/logging"
+	"github.com/jamesits/machineproxy/pkg/subreaper"
 )
 
 func main() {
@@ -25,15 +26,16 @@ func run() int {
 	}))
 
 	// Become a subreaper so orphaned grandchildren are reparented to us.
-	if _, _, errno := syscall.RawSyscall(syscall.SYS_PRCTL, 36 /* PR_SET_CHILD_SUBREAPER */, 1, 0); errno != 0 {
-		log.Warn("prctl(PR_SET_CHILD_SUBREAPER) failed", "error", errno)
-		// Non-fatal: zombie reaping still works for direct children.
+	// No-op on platforms that lack a subreaper concept (macOS, Windows).
+	if err := subreaper.Setup(); err != nil {
+		log.Warn("setup subreaper failed", "error", err)
+		// Non-fatal: zombie reaping still works for direct children where applicable.
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go reapZombies(ctx)
+	go subreaper.Reap(ctx)
 
 	// The mux reads from our stdin and writes to our stdout.
 	// Our stderr goes to the SSH session's stderr channel for diagnostics.
@@ -73,7 +75,14 @@ func run() int {
 
 	log.Log(ctx, logging.LevelTrace, "building command", "path", f.Exec.Path, "argv", f.Exec.Argv, "cwd", f.Exec.Cwd)
 
-	cmd, pipes, err := buildCmd(f.Exec)
+	cmd, pipes, err := childproc.Build(childproc.Spec{
+		Path:                f.Exec.Path,
+		Argv:                f.Exec.Argv,
+		Env:                 f.Exec.Env,
+		Cwd:                 f.Exec.Cwd,
+		ExtraFDs:            f.Exec.ExtraFDs,
+		DropSudoCredentials: true,
+	})
 	if err != nil {
 		log.Error("build command failed", "error", err)
 		_ = mux.Send(&agentproto.Frame{
@@ -85,7 +94,7 @@ func run() int {
 	}
 
 	if err := cmd.Start(); err != nil {
-		closePipes(pipes)
+		pipes.Close()
 		// Here we use warn not error, because sometimes TUI apps (I hate these but shrug) invokes non-existing programs
 		// in the background and this log breaks the TUI. Using warn level here allow the user to disable this log output.
 		log.Warn("start command failed", "error", err)
@@ -100,18 +109,18 @@ func run() int {
 	log.Log(ctx, logging.LevelTrace, "child started", "pid", cmd.Process.Pid)
 
 	// Close child-side fds so the child is the only holder.
-	closeChildFDs(cmd)
+	childproc.CloseChildSide(cmd)
 
 	// Register mux stream handlers for writing to child's stdin and extra fds.
-	mux.RegisterStream(0, agentproto.WriterHandler(pipes.stdin))
-	for fdNum, f := range pipes.extra {
+	mux.RegisterStream(0, agentproto.WriterHandler(pipes.Stdin))
+	for fdNum, f := range pipes.Extra {
 		mux.RegisterStream(fdNum, agentproto.WriterHandler(f))
 	}
 
 	// Forward signals to the child's process group.
 	mux.OnSignal(func(sig int) {
 		log.Log(ctx, logging.LevelTrace, "forwarding signal to child", "signal", sig)
-		if err := sendSignalToGroup(cmd, sig); err != nil {
+		if err := childproc.SignalGroup(cmd, sig); err != nil {
 			log.Warn("failed to send signal to child group", "signal", sig, "error", err)
 		}
 	})
@@ -144,9 +153,9 @@ func run() int {
 		}()
 	}
 
-	bridgeToMux(1, pipes.stdout)
-	bridgeToMux(2, pipes.stderr)
-	for fdNum, f := range pipes.extra {
+	bridgeToMux(1, pipes.Stdout)
+	bridgeToMux(2, pipes.Stderr)
+	for fdNum, f := range pipes.Extra {
 		bridgeToMux(fdNum, f)
 	}
 
@@ -165,7 +174,7 @@ func run() int {
 	code := 0
 	if waitErr != nil {
 		if cmd.ProcessState != nil {
-			code = exitCode(cmd.ProcessState)
+			code = childproc.ExitCode(cmd.ProcessState)
 		} else {
 			code = 127
 		}

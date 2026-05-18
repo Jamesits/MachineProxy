@@ -11,7 +11,8 @@ Run a program locally while it accesses files and executes commands on a remote 
 
 ## Code Style
 - Use comments to document higher-level intent
-- Run `go fmt ./...`, `go vet ./...` and `golangci-lint run` after code change
+- Keep `cmd/*` lean, organize features into packages
+- Run `go vet ./...` (must be run in `GOOS`/`GOARCH` matrix), `golangci-lint run` and `go fmt ./...` after code change
 
 ## Compilation
 Always perform a full rebuild with `goreleaser build --snapshot --clean`, and use the artifacts under `dist/`.

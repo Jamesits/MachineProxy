@@ -33,8 +33,12 @@ func ResolveAgentBinaryPath(configPath, goos, goarch string) (string, error) {
 	if p := os.Getenv("MPROXY_AGENT_BIN"); p != "" {
 		return p, nil
 	}
-	return resolveBinary("mproxy-agent", configPath, []string{
-		filepath.Join(LibDir, "agent", goos, goarch, "mproxy-agent"),
+	name := "mproxy-agent"
+	if goos == "windows" {
+		name = "mproxy-agent.exe"
+	}
+	return resolveBinary(name, configPath, []string{
+		filepath.Join(LibDir, "agent", goos, goarch, name),
 	})
 }
 

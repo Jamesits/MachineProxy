@@ -49,6 +49,14 @@ builds:
     main: ./cmd/mproxy-agent
     binary: agent/{{ .Os }}/{{ .Arch }}/mproxy-agent
     no_unique_dist_dir: true
+    goos:
+      - linux
+      - darwin
+      - freebsd
+      - windows
+    goarch:
+      - amd64
+      - arm64
 
 archives:
   - id: machineproxy
