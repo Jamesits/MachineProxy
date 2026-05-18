@@ -104,12 +104,12 @@ jobs:
           ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519 -C "machineproxy-e2e"
           {
             echo "Host machineproxy-e2e"
-            echo "    HostName ::1"
             echo "    Port 12222"
             echo "    User root"
             echo "    IdentityFile ~/.ssh/id_ed25519"
             echo "    IdentitiesOnly yes"
             echo "    LogLevel ERROR"
+            echo "    HostName ::1"
           } > ~/.ssh/config
           chmod 600 ~/.ssh/config
           echo "AUTHORIZED_KEY=$(cat ~/.ssh/id_ed25519.pub)" >> "$GITHUB_ENV"
