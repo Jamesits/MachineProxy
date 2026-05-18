@@ -33,18 +33,22 @@ PRETTY_NAME="Rocky Linux 8.10 (Green Obsidian)"
 
 Install [the latest package](https://github.com/Jamesits/MachineProxy/releases/latest) with your package manager of choice.
 
-Config `container.local_commands` in `/etc/machineproxy/machineproxy.toml` according to your needs.
+Config `container.local_commands` in `/etc/machineproxy/machineproxy.toml` according to your needs. See the [example config](/config/machineproxy.example.toml) for less common use cases, including environment variable filtering.
+
+### SSH
 
 Create an empty directory on your local workstation at the same path as the remote workspace. If you can't, use `-v "$(pwd):/path/to/remote/workspace"` to map a different local path.
-
-Then run it:
 
 ```shell
 cd /path/to/your/workspace/root
 machineproxy [-p port] [[user@]hostname] -- <program>
 ```
 
-See the [example config](/config/machineproxy.example.toml) for less common use cases, including environment variable filtering.
+### Docker
+
+```shell
+machineproxy -v "$(pwd):/workspace" docker://container_id -- <program>
+```
 
 ## Development
 
@@ -77,14 +81,14 @@ This program aims to work around these problems.
 
 MachineProxy pros:
 
-- `@file` works
+- `@file` and harness-local file/code indexing works
 - All native tools (read/write files, searching, executing programs or shell commands, etc.) work
-- Harness-local file/code indexing works
 - Local executables can call remote executables, and they can pipe data between each other
+- Works over both SSH and Docker
 
 "Just use SSH" pros:
 
-- Broader compatibility
+- Broader compatibility on embedded systems with a SSH server
 
 ### How
 
