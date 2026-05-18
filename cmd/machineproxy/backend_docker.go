@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 
 	"github.com/jamesits/machineproxy/pkg/config"
@@ -11,8 +12,8 @@ import (
 )
 
 func init() {
-	registerBackend("docker", func(cfg *config.Config, log *slog.Logger) (remote.Backend, error) {
-		return remotedocker.New(remotedocker.Config{
+	registerBackend("docker", func(ctx context.Context, cfg *config.Config, log *slog.Logger) (remote.Backend, error) {
+		return remotedocker.New(ctx, remotedocker.Config{
 			Container: cfg.Remote.Docker.Container,
 			Host:      cfg.Remote.Docker.Host,
 			Log:       log.With("component", "docker"),

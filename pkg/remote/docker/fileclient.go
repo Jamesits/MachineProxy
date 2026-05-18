@@ -23,7 +23,11 @@ type agentFileClient struct {
 	mux  *agentproto.Mux
 	sess *dockerSession
 
-	// cancel terminates the mux read-loop context.
+	// ctx is the lifetime context for file ops issued through this
+	// client. It is the same context that drives the mux read-loop, so
+	// closing the client (which calls cancel) also cancels any
+	// in-flight ops.
+	ctx    context.Context
 	cancel context.CancelFunc
 	doneCh chan struct{}
 }
@@ -33,7 +37,7 @@ type agentFileClient struct {
 // every op through that agent.
 func newAgentFileClient(parent context.Context, b *Backend, agentRemotePath string) (*agentFileClient, error) {
 	ctx, cancel := context.WithCancel(parent)
-	sess := newSession(b.cli, b.containerID)
+	sess := newSession(ctx, b.cli, b.containerID)
 	stdin, err := sess.StdinPipe()
 	if err != nil {
 		cancel()
@@ -57,7 +61,7 @@ func newAgentFileClient(parent context.Context, b *Backend, agentRemotePath stri
 	go func() { _, _ = io.Copy(io.Discard, stderr) }()
 
 	mux := agentproto.NewMux(stdout, stdin)
-	c := &agentFileClient{mux: mux, sess: sess, cancel: cancel, doneCh: make(chan struct{})}
+	c := &agentFileClient{mux: mux, sess: sess, ctx: ctx, cancel: cancel, doneCh: make(chan struct{})}
 
 	go func() {
 		defer close(c.doneCh)
@@ -129,7 +133,7 @@ func errnoToErr(resp *agentproto.FileOpResp) error {
 
 // Open implements remote.FileClient.
 func (c *agentFileClient) Open(p string) (remote.RemoteFile, error) {
-	resp, err := c.do(context.Background(), &agentproto.FileOpReq{Op: agentproto.FileOpOpen, Path: p})
+	resp, err := c.do(c.ctx, &agentproto.FileOpReq{Op: agentproto.FileOpOpen, Path: p})
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +142,7 @@ func (c *agentFileClient) Open(p string) (remote.RemoteFile, error) {
 
 // Create implements remote.FileClient.
 func (c *agentFileClient) Create(p string) (remote.RemoteWriteFile, error) {
-	resp, err := c.do(context.Background(), &agentproto.FileOpReq{Op: agentproto.FileOpCreate, Path: p})
+	resp, err := c.do(c.ctx, &agentproto.FileOpReq{Op: agentproto.FileOpCreate, Path: p})
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +151,7 @@ func (c *agentFileClient) Create(p string) (remote.RemoteWriteFile, error) {
 
 // OpenFile implements remote.FileClient.
 func (c *agentFileClient) OpenFile(p string, flags int) (remote.RemoteWriteFile, error) {
-	resp, err := c.do(context.Background(), &agentproto.FileOpReq{
+	resp, err := c.do(c.ctx, &agentproto.FileOpReq{
 		Op:    agentproto.FileOpOpenFile,
 		Path:  p,
 		Flags: int32(flags),
@@ -160,7 +164,7 @@ func (c *agentFileClient) OpenFile(p string, flags int) (remote.RemoteWriteFile,
 
 // Stat implements remote.FileClient.
 func (c *agentFileClient) Stat(p string) (os.FileInfo, error) {
-	resp, err := c.do(context.Background(), &agentproto.FileOpReq{Op: agentproto.FileOpStat, Path: p})
+	resp, err := c.do(c.ctx, &agentproto.FileOpReq{Op: agentproto.FileOpStat, Path: p})
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +176,7 @@ func (c *agentFileClient) Stat(p string) (os.FileInfo, error) {
 
 // ReadDir implements remote.FileClient.
 func (c *agentFileClient) ReadDir(p string) ([]os.FileInfo, error) {
-	resp, err := c.do(context.Background(), &agentproto.FileOpReq{Op: agentproto.FileOpReadDir, Path: p})
+	resp, err := c.do(c.ctx, &agentproto.FileOpReq{Op: agentproto.FileOpReadDir, Path: p})
 	if err != nil {
 		return nil, err
 	}
@@ -185,25 +189,25 @@ func (c *agentFileClient) ReadDir(p string) ([]os.FileInfo, error) {
 
 // Mkdir implements remote.FileClient.
 func (c *agentFileClient) Mkdir(p string) error {
-	_, err := c.do(context.Background(), &agentproto.FileOpReq{Op: agentproto.FileOpMkdir, Path: p, Mode: 0o755})
+	_, err := c.do(c.ctx, &agentproto.FileOpReq{Op: agentproto.FileOpMkdir, Path: p, Mode: 0o755})
 	return err
 }
 
 // MkdirAll implements remote.FileClient.
 func (c *agentFileClient) MkdirAll(p string) error {
-	_, err := c.do(context.Background(), &agentproto.FileOpReq{Op: agentproto.FileOpMkdirAll, Path: p, Mode: 0o755})
+	_, err := c.do(c.ctx, &agentproto.FileOpReq{Op: agentproto.FileOpMkdirAll, Path: p, Mode: 0o755})
 	return err
 }
 
 // Remove implements remote.FileClient.
 func (c *agentFileClient) Remove(p string) error {
-	_, err := c.do(context.Background(), &agentproto.FileOpReq{Op: agentproto.FileOpRemove, Path: p})
+	_, err := c.do(c.ctx, &agentproto.FileOpReq{Op: agentproto.FileOpRemove, Path: p})
 	return err
 }
 
 // Rename implements remote.FileClient.
 func (c *agentFileClient) Rename(oldPath, newPath string) error {
-	_, err := c.do(context.Background(), &agentproto.FileOpReq{
+	_, err := c.do(c.ctx, &agentproto.FileOpReq{
 		Op: agentproto.FileOpRename, Path: oldPath, NewPath: newPath,
 	})
 	return err
@@ -211,7 +215,7 @@ func (c *agentFileClient) Rename(oldPath, newPath string) error {
 
 // Chmod implements remote.FileClient.
 func (c *agentFileClient) Chmod(p string, mode os.FileMode) error {
-	_, err := c.do(context.Background(), &agentproto.FileOpReq{
+	_, err := c.do(c.ctx, &agentproto.FileOpReq{
 		Op: agentproto.FileOpChmod, Path: p, Mode: uint32(mode),
 	})
 	return err
@@ -219,7 +223,7 @@ func (c *agentFileClient) Chmod(p string, mode os.FileMode) error {
 
 // Truncate implements remote.FileClient.
 func (c *agentFileClient) Truncate(p string, size int64) error {
-	_, err := c.do(context.Background(), &agentproto.FileOpReq{
+	_, err := c.do(c.ctx, &agentproto.FileOpReq{
 		Op: agentproto.FileOpTruncate, Path: p, Size: size,
 	})
 	return err
@@ -227,7 +231,7 @@ func (c *agentFileClient) Truncate(p string, size int64) error {
 
 // Getwd implements remote.FileClient.
 func (c *agentFileClient) Getwd() (string, error) {
-	resp, err := c.do(context.Background(), &agentproto.FileOpReq{Op: agentproto.FileOpGetwd})
+	resp, err := c.do(c.ctx, &agentproto.FileOpReq{Op: agentproto.FileOpGetwd})
 	if err != nil {
 		return "", err
 	}
@@ -254,7 +258,7 @@ func (f *remoteFile) Read(p []byte) (int, error) {
 }
 
 func (f *remoteFile) ReadAt(p []byte, off int64) (int, error) {
-	resp, err := f.c.do(context.Background(), &agentproto.FileOpReq{
+	resp, err := f.c.do(f.c.ctx, &agentproto.FileOpReq{
 		Op:     agentproto.FileOpReadAt,
 		Handle: f.handle,
 		Offset: off,
@@ -271,7 +275,7 @@ func (f *remoteFile) ReadAt(p []byte, off int64) (int, error) {
 }
 
 func (f *remoteFile) Close() error {
-	_, err := f.c.do(context.Background(), &agentproto.FileOpReq{Op: agentproto.FileOpClose, Handle: f.handle})
+	_, err := f.c.do(f.c.ctx, &agentproto.FileOpReq{Op: agentproto.FileOpClose, Handle: f.handle})
 	return err
 }
 
@@ -295,7 +299,7 @@ func (f *remoteWriteFile) Write(p []byte) (int, error) {
 }
 
 func (f *remoteWriteFile) WriteAt(p []byte, off int64) (int, error) {
-	resp, err := f.c.do(context.Background(), &agentproto.FileOpReq{
+	resp, err := f.c.do(f.c.ctx, &agentproto.FileOpReq{
 		Op:     agentproto.FileOpWriteAt,
 		Handle: f.handle,
 		Offset: off,
@@ -308,7 +312,7 @@ func (f *remoteWriteFile) WriteAt(p []byte, off int64) (int, error) {
 }
 
 func (f *remoteWriteFile) Close() error {
-	_, err := f.c.do(context.Background(), &agentproto.FileOpReq{Op: agentproto.FileOpClose, Handle: f.handle})
+	_, err := f.c.do(f.c.ctx, &agentproto.FileOpReq{Op: agentproto.FileOpClose, Handle: f.handle})
 	return err
 }
 

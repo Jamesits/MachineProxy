@@ -46,7 +46,7 @@ type Backend struct {
 
 // New constructs a Docker backend. The docker daemon is not contacted
 // until Start.
-func New(cfg Config) (*Backend, error) {
+func New(ctx context.Context, cfg Config) (*Backend, error) {
 	if cfg.Container == "" {
 		return nil, errors.New("docker backend: container is required")
 	}
@@ -62,7 +62,7 @@ func New(cfg Config) (*Backend, error) {
 	if err != nil {
 		return nil, fmt.Errorf("docker client: %w", err)
 	}
-	log.Log(nil, logging.LevelTrace, "docker client resolved",
+	log.Log(ctx, logging.LevelTrace, "docker client resolved",
 		"host", cli.DaemonHost(),
 		"api_version", cli.ClientVersion(),
 	)
@@ -141,7 +141,7 @@ func (b *Backend) NewSession(ctx context.Context) (remote.Session, error) {
 	if id == "" {
 		return nil, errors.New("docker backend: not started")
 	}
-	return newSession(b.cli, id), nil
+	return newSession(ctx, b.cli, id), nil
 }
 
 // Files returns a long-lived FileClient backed by a docker exec'd
@@ -258,7 +258,7 @@ func resolveContainerPath(ctx context.Context, cli *client.Client, containerID, 
 // execCapture runs a one-shot command in the container and returns its
 // stdout. Used for short housekeeping operations like resolving $HOME.
 func execCapture(ctx context.Context, cli *client.Client, containerID string, cmd []string) (string, error) {
-	sess := newSession(cli, containerID)
+	sess := newSession(ctx, cli, containerID)
 	stdout, err := sess.StdoutPipe()
 	if err != nil {
 		return "", err

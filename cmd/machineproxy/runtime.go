@@ -57,8 +57,8 @@ type runtimeDeps struct {
 	brokerCtxCancel context.CancelFunc
 }
 
-func newRuntimeDeps(cfg *config.Config, log *slog.Logger) (*runtimeDeps, error) {
-	backend, err := buildBackend(cfg, log)
+func newRuntimeDeps(ctx context.Context, cfg *config.Config, log *slog.Logger) (*runtimeDeps, error) {
+	backend, err := buildBackend(ctx, cfg, log)
 	if err != nil {
 		return nil, err
 	}

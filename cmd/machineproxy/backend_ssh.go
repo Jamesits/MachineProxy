@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"time"
 
@@ -12,7 +13,7 @@ import (
 )
 
 func init() {
-	registerBackend("ssh", func(cfg *config.Config, log *slog.Logger) (remote.Backend, error) {
+	registerBackend("ssh", func(_ context.Context, cfg *config.Config, log *slog.Logger) (remote.Backend, error) {
 		return remotessh.New(remotessh.Config{
 			Host:           cfg.Remote.SSH.Host,
 			User:           cfg.Remote.SSH.User,

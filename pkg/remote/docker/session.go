@@ -53,8 +53,14 @@ type dockerSession struct {
 	cancelBg context.CancelFunc
 }
 
-func newSession(cli *client.Client, containerID string) *dockerSession {
-	s := &dockerSession{cli: cli, containerID: containerID}
+func newSession(parent context.Context, cli *client.Client, containerID string) *dockerSession {
+	bgCtx, cancel := context.WithCancel(parent)
+	s := &dockerSession{
+		cli:         cli,
+		containerID: containerID,
+		bgCtx:       bgCtx,
+		cancelBg:    cancel,
+	}
 	s.stdinPipeR, s.stdinPipeW = io.Pipe()
 	s.stdoutR, s.stdoutW = io.Pipe()
 	s.stderrR, s.stderrW = io.Pipe()
@@ -90,11 +96,7 @@ func (s *dockerSession) Start(cmdline string) error {
 	}
 	s.started = true
 
-	bgCtx, cancel := context.WithCancel(context.Background())
-	s.bgCtx = bgCtx
-	s.cancelBg = cancel
-
-	created, err := s.cli.ContainerExecCreate(bgCtx, s.containerID, container.ExecOptions{
+	created, err := s.cli.ContainerExecCreate(s.bgCtx, s.containerID, container.ExecOptions{
 		AttachStdin:  true,
 		AttachStdout: true,
 		AttachStderr: true,
@@ -108,7 +110,7 @@ func (s *dockerSession) Start(cmdline string) error {
 	}
 	s.execID = created.ID
 
-	attach, err := s.cli.ContainerExecAttach(bgCtx, s.execID, container.ExecAttachOptions{Tty: false})
+	attach, err := s.cli.ContainerExecAttach(s.bgCtx, s.execID, container.ExecAttachOptions{Tty: false})
 	if err != nil {
 		s.closePipes()
 		return fmt.Errorf("docker exec attach: %w", err)

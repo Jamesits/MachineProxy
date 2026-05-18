@@ -149,7 +149,7 @@ func run(rawArgs []string) error {
 
 	log.Debug("starting machineproxy", "command", parsed.cmd, "backend", cfg.Remote.Type)
 
-	deps, err := newRuntimeDeps(cfg, log)
+	deps, err := newRuntimeDeps(ctx, cfg, log)
 	if err != nil {
 		return err
 	}

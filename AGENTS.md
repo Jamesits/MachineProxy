@@ -12,8 +12,8 @@ Run a program locally while it accesses files and executes commands on a remote 
 ## Code Style
 - Use comments to document higher-level intent
 - Keep `cmd/*` lean, organize features into packages
-- Avoid using `context.Background()` and `context.TODO()` in packages, use the context from caller
-- Run `go vet ./...` (must be run in `GOOS`/`GOARCH` matrix), `golangci-lint run` and `go fmt ./...` after code change
+- Avoid using `context.Background()`, `context.TODO()` or `nil` context in packages, use the context from caller
+- Run `go vet -tags backend_docker,backend_ssh ./...` (must be run in `GOOS`/`GOARCH` matrix), `golangci-lint run` and `go fmt ./...` after code change
 
 ## Compilation
 Always perform a full rebuild with `goreleaser build --snapshot --clean`, and use the artifacts under `dist/`.
