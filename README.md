@@ -18,11 +18,13 @@ Here's a simple demo with explanation of what happened on each command. We use `
 ubuntu@workstation:~/temp$ machineproxy remote.host -- bash
 
 # Bash itself is running in the workstation, so if you instruct it to read a file, it reads the file from the workstation.
+# The shell prompt does not change too because bash reads its RC file from the workstation.
 # `grep` is a child process so it runs in the remote host; MachineProxy proxies the pipe between them.
 ubuntu@workstation:~/temp$ echo "$(</etc/os-release)" | grep PRETTY_NAME
 PRETTY_NAME="Ubuntu 26.04 LTS"
 
 # `cat` is a child process so it runs in the remote host and reads the file from the remote host.
+# `grep` run in the remote host too.
 ubuntu@workstation:~/temp$ cat /etc/os-release | grep PRETTY_NAME
 PRETTY_NAME="Rocky Linux 8.10 (Green Obsidian)"
 ```

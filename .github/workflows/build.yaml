@@ -109,8 +109,6 @@ jobs:
             echo "    User root"
             echo "    IdentityFile ~/.ssh/id_ed25519"
             echo "    IdentitiesOnly yes"
-            echo "    StrictHostKeyChecking no"
-            echo "    UserKnownHostsFile /dev/null"
             echo "    LogLevel ERROR"
           } > ~/.ssh/config
           chmod 600 ~/.ssh/config
@@ -132,6 +130,9 @@ jobs:
         run: |
           docker compose up -d --build --wait --wait-timeout 60
           docker compose ps
+
+      - name: Trust SSH host key
+        run: ssh-keyscan -p 12222 ::1 >> ~/.ssh/known_hosts
 
       - name: Write machineproxy config
         run: |
