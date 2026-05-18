@@ -161,9 +161,10 @@ jobs:
       - name: E2E - remote exec returns the container's OS
         env:
           MPROXY: /usr/bin/machineproxy
+        # The entrypoint program executes locally. Let it exec another program to actually do anything on the remote.
         run: |
           set -euo pipefail
-          out=$("$MPROXY" --config /tmp/e2e.yaml -- cat /etc/os-release)
+          out=$("$MPROXY" --config /tmp/e2e.yaml -- bash -c 'cat /etc/os-release')
           printf '%s\n' "$out"
           case "${{ matrix.template }}" in
             centos7)   echo "$out" | grep -Eqi 'centos|^ID=.*centos' ;;
