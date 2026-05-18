@@ -1,13 +1,12 @@
 # MachineProxy
 
-MachineProxy solves the last-hop problem for your AI agent, even when the target machine is too outdated to install the agent on or has no Internet access.
+MachineProxy creates a mixed-reality environment for your agent, or for any other program. The program itself runs locally while seeing and acting on another machine over SSH. Harness features and tools work transparently.
+It solves the last-hop problem for your AI agent, even when the target machine is too outdated to install the agent on or has no Internet access.
 
 ![Project Status - Premature](https://img.shields.io/badge/Project_Status-Premature-yellow)
 ![100% AI Code](https://img.shields.io/badge/AI_Code-100%25-blue)
 ![Reviewed by a Human](https://img.shields.io/badge/Reviewed_by-a_Human-green)
 [![Go Reference](https://pkg.go.dev/badge/github.com/jamesits/machineproxy.svg)](https://pkg.go.dev/github.com/jamesits/machineproxy)
-
-MachineProxy creates a mixed-reality environment for your agent, or for any other program. The program itself runs locally while seeing and acting on another machine over SSH. Harness features and tools work transparently.
 
 ## Usage
 
