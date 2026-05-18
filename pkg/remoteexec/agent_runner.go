@@ -234,6 +234,125 @@ func (r *AgentRunner) RunWithControl(ctx context.Context, req Request, ctrl *Con
 	return exitCode, nil
 }
 
+// EnumeratePaths asks the remote agent to enumerate executables
+// reachable through the given PATH-style directories. An empty paths
+// slice tells the agent to use its own $PATH. The session is short-
+// lived: the agent sends one FramePathInfo and exits.
+func (r *AgentRunner) EnumeratePaths(ctx context.Context, paths []string) ([]agentproto.PathInfoEntry, error) {
+	log := r.logger()
+	if r == nil || r.Provider == nil {
+		return nil, fmt.Errorf("agent runner provider is nil")
+	}
+	if r.Transferer == nil {
+		return nil, fmt.Errorf("agent runner transferer is nil")
+	}
+
+	agentPath, err := r.Transferer.Ensure()
+	if err != nil {
+		return nil, fmt.Errorf("ensure agent binary: %w", err)
+	}
+
+	log.Debug("opening ssh session for path enumeration")
+	session, err := r.Provider.NewSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer session.Close()
+
+	sessIn, err := session.StdinPipe()
+	if err != nil {
+		return nil, err
+	}
+	sessOut, err := session.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	sessErr, err := session.StderrPipe()
+	if err != nil {
+		return nil, err
+	}
+
+	if err := session.Start(shellQuote(agentPath)); err != nil {
+		return nil, fmt.Errorf("start agent: %w", err)
+	}
+
+	// Drain stderr so the agent process doesn't block on a full pipe.
+	// It's only used for early bootstrap diagnostics; once the mux is up
+	// log frames flow through stdout instead.
+	go func() { _, _ = io.Copy(io.Discard, sessErr) }()
+
+	mux := agentproto.NewMux(sessOut, sessIn)
+	mux.OnLog(func(entry *agentproto.LogEntry) {
+		attrs := make([]any, 0, len(entry.Attrs)*2+2)
+		attrs = append(attrs, "source", "agent")
+		for _, kv := range entry.Attrs {
+			if k, v, ok := strings.Cut(kv, "="); ok {
+				attrs = append(attrs, k, v)
+			} else {
+				attrs = append(attrs, kv, "")
+			}
+		}
+		log.Log(ctx, slog.Level(entry.Level), entry.Msg, attrs...)
+	})
+
+	if r.AgentConfig != nil {
+		if err := mux.Send(&agentproto.Frame{
+			Type:   agentproto.FrameConfig,
+			Config: r.AgentConfig,
+		}); err != nil {
+			return nil, fmt.Errorf("send config frame: %w", err)
+		}
+	}
+
+	log.Log(ctx, logging.LevelTrace, "sending path-query frame", "paths", paths)
+	if err := mux.Send(&agentproto.Frame{
+		Type:  agentproto.FramePathQuery,
+		Query: &agentproto.PathQuery{Paths: paths},
+	}); err != nil {
+		return nil, fmt.Errorf("send path query: %w", err)
+	}
+
+	// Loop until we see the response, draining log frames in between.
+	var entries []agentproto.PathInfoEntry
+	for {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		f, decErr := mux.DecodeOne()
+		if decErr != nil {
+			return nil, fmt.Errorf("read path info: %w", decErr)
+		}
+		switch f.Type {
+		case agentproto.FramePathInfo:
+			if f.Info != nil {
+				entries = f.Info.Entries
+			}
+			// Close our side; the agent will exit after sending.
+			_ = sessIn.Close()
+			_ = session.Wait()
+			log.Log(ctx, logging.LevelTrace, "received path info", "count", len(entries))
+			return entries, nil
+		case agentproto.FrameLog:
+			if f.Log != nil {
+				attrs := make([]any, 0, len(f.Log.Attrs)*2+2)
+				attrs = append(attrs, "source", "agent")
+				for _, kv := range f.Log.Attrs {
+					if k, v, ok := strings.Cut(kv, "="); ok {
+						attrs = append(attrs, k, v)
+					} else {
+						attrs = append(attrs, kv, "")
+					}
+				}
+				log.Log(ctx, slog.Level(f.Log.Level), f.Log.Msg, attrs...)
+			}
+		case agentproto.FrameError:
+			return nil, fmt.Errorf("agent error: %s", f.Error)
+		default:
+			log.Warn("unexpected frame during enumeration", "type", f.Type)
+		}
+	}
+}
+
 // Verify interface compliance.
 var (
 	_ Runner           = (*AgentRunner)(nil)

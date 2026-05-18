@@ -12,6 +12,7 @@ import (
 	"github.com/jamesits/machineproxy/pkg/childproc"
 	"github.com/jamesits/machineproxy/pkg/envfilter"
 	"github.com/jamesits/machineproxy/pkg/logging"
+	"github.com/jamesits/machineproxy/pkg/pathstub"
 	"github.com/jamesits/machineproxy/pkg/subreaper"
 )
 
@@ -45,7 +46,8 @@ func run() int {
 	log = slog.New(agentproto.NewMuxLogHandler(mux, logging.LevelTrace))
 	slog.SetDefault(log)
 
-	// Read initial frames: optional FrameConfig followed by required FrameExec.
+	// Read initial frames: optional FrameConfig followed by either a
+	// FrameExec (normal exec mode) or a FramePathQuery (enumeration mode).
 	var agentCfg *agentproto.AgentConfig
 	f, err := mux.DecodeOne()
 	if err != nil {
@@ -56,15 +58,38 @@ func run() int {
 		agentCfg = f.Config
 		log.Log(ctx, logging.LevelTrace, "received agent config",
 			"env_keep", len(agentCfg.EnvKeep), "env_remove", len(agentCfg.EnvRemove))
-		// Read the next frame which must be FrameExec.
+		// Read the next frame: either FrameExec or FramePathQuery.
 		f, err = mux.DecodeOne()
 		if err != nil {
-			log.Error("reading exec frame failed", "error", err)
+			log.Error("reading next frame failed", "error", err)
 			return 127
 		}
 	}
+
+	// Branch on operation: PATH enumeration is a one-shot exchange that
+	// returns a single FramePathInfo and exits without launching a child.
+	if f.Type == agentproto.FramePathQuery {
+		var paths []string
+		if f.Query != nil {
+			paths = f.Query.Paths
+		}
+		entries, enumErr := pathstub.EnumerateLocally(paths)
+		if enumErr != nil {
+			log.Warn("path enumeration failed", "error", enumErr)
+		}
+		log.Log(ctx, logging.LevelTrace, "path enumeration complete", "count", len(entries))
+		if sendErr := mux.Send(&agentproto.Frame{
+			Type: agentproto.FramePathInfo,
+			Info: &agentproto.PathInfo{Entries: entries},
+		}); sendErr != nil {
+			log.Error("send path info failed", "error", sendErr)
+			return 127
+		}
+		return 0
+	}
+
 	if f.Type != agentproto.FrameExec || f.Exec == nil {
-		log.Error("expected exec frame", "type", f.Type)
+		log.Error("expected exec or path-query frame", "type", f.Type)
 		return 127
 	}
 

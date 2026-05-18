@@ -65,6 +65,12 @@ type Config struct {
 		Mounts        []string `yaml:"mounts" toml:"mounts" json:"mounts"`                // docker-compose style: [local:]remote
 		WorkingDir    string   `yaml:"working_dir" toml:"working_dir" json:"working_dir"` // override container working directory; defaults to first mount's local path
 		EnvRemove     []string `yaml:"env_remove" toml:"env_remove" json:"env_remove"`    // glob/regex patterns for env vars to strip from the container process
+		// PathProxy controls the FUSE-backed PATH-stub directory that
+		// surfaces remote-side executables inside the container.
+		//   "prepend"  — stubs win over locally-installed binaries (default)
+		//   "append"   — local binaries win; stubs only fill gaps
+		//   "disabled" — skip enumeration entirely
+		PathProxy string `yaml:"path_proxy" toml:"path_proxy" json:"path_proxy"`
 	} `yaml:"container" toml:"container" json:"container"`
 
 	Agent struct {
@@ -101,6 +107,9 @@ func (c *Config) applyDefaults() error {
 		c.Container.EnvRemove = []string{
 			"MPROXY_*",
 		}
+	}
+	if c.Container.PathProxy == "" {
+		c.Container.PathProxy = "prepend"
 	}
 	if len(c.Agent.EnvKeep) == 0 {
 		c.Agent.EnvKeep = []string{
@@ -159,6 +168,11 @@ func (c *Config) Validate() error {
 		if _, err := CompileLocalCommand(p); err != nil {
 			return fmt.Errorf("container.local_commands: %w", err)
 		}
+	}
+	switch c.Container.PathProxy {
+	case "prepend", "append", "disabled":
+	default:
+		return fmt.Errorf("container.path_proxy must be one of prepend, append, disabled; got %q", c.Container.PathProxy)
 	}
 	return nil
 }

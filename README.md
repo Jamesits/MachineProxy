@@ -125,10 +125,6 @@ DO NOT treat MachineProxy as a security barrier. Programs launched by MachinePro
 
 - DO NOT mount over your local home directory, otherwise your AI agents might not be able to read its config.
 
-### Shells
-
-Some shells (`sh`, Bash, etc.) maintain a command cache for quick lookups in `PATH`. If a command exists on the remote device but not on the local device, the shell may refuse to launch it. Use the full path (`/usr/bin/...`) to bypass the command cache instead.
-
 ### VSCode Terminal
 
 VSCode Terminal seems to override `/usr/bin/env node` in some cases, causing some programs, such as [Amp](https://ampcode.com), to fail to launch. If you are using MachineProxy from a VSCode Terminal, run Node.js programs like this, using `amp` as an example:

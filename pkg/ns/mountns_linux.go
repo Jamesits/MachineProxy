@@ -5,9 +5,32 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/jamesits/machineproxy/pkg/logging"
 )
+
+// Bind describes one bwrap --bind entry. Src is a path on the host;
+// Dst is the path it appears at inside the namespace.
+type Bind struct {
+	Src string
+	Dst string
+}
+
+// PathInjection controls splicing an extra directory into the PATH env
+// variable for the container process.
+type PathInjection struct {
+	// Dir is the absolute path (as seen inside the container) to splice
+	// in. When empty, FormatEnv leaves PATH untouched.
+	Dir string
+	// Position is "prepend" or "append". Empty means prepend.
+	Position string
+}
+
+// defaultPath is used when the inherited environment has no PATH at all
+// but we still need to inject a stub directory. Matches typical Linux
+// distributions.
+const defaultPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 // Deps allows dependency injection for testing.
 type Deps struct {
@@ -48,19 +71,14 @@ func (n *Namespace) Prepare(ctx context.Context) error {
 }
 
 // Run executes cmdline inside a bwrap sandbox. The host root is
-// bind-mounted read-write, and fuseMountDir is bound over containerPath
-// so the FUSE workspace is visible at the expected location.
-// workingDir sets the initial working directory inside the container.
-func (n *Namespace) Run(ctx context.Context, fuseMountDir, containerPath, workingDir string, cmdline []string, env []string) error {
-	args := []string{
-		"--dev-bind", "/", "/",
-		"--bind", fuseMountDir, containerPath,
-		"--chdir", workingDir,
-		"--die-with-parent",
-	}
-	args = append(args, cmdline...)
+// bind-mounted read-write, and each entry in binds is bind-mounted onto
+// its Dst path so FUSE-backed directories (workspace, path-stub) appear
+// at the expected container locations. workingDir sets the initial
+// working directory inside the container.
+func (n *Namespace) Run(ctx context.Context, workingDir string, cmdline []string, env []string, binds []Bind) error {
+	args := buildBwrapArgs(workingDir, cmdline, binds)
 
-	n.log.Debug("running in namespace", "bwrap", n.bwrapBin, "container_path", containerPath)
+	n.log.Debug("running in namespace", "bwrap", n.bwrapBin, "binds", len(binds))
 	n.log.Log(ctx, logging.LevelTrace, "bwrap full args", "args", args)
 
 	cmd := exec.CommandContext(ctx, n.bwrapBin, args...)
@@ -74,15 +92,18 @@ func (n *Namespace) Run(ctx context.Context, fuseMountDir, containerPath, workin
 
 // Command returns the bwrap binary path and full argument list without
 // executing anything. Useful for inspection and testing.
-func (n *Namespace) Command(fuseMountDir, containerPath, workingDir string, cmdline []string) (string, []string) {
-	args := []string{
-		"--dev-bind", "/", "/",
-		"--bind", fuseMountDir, containerPath,
-		"--chdir", workingDir,
-		"--die-with-parent",
+func (n *Namespace) Command(workingDir string, cmdline []string, binds []Bind) (string, []string) {
+	return n.bwrapBin, buildBwrapArgs(workingDir, cmdline, binds)
+}
+
+func buildBwrapArgs(workingDir string, cmdline []string, binds []Bind) []string {
+	args := []string{"--dev-bind", "/", "/"}
+	for _, b := range binds {
+		args = append(args, "--bind", b.Src, b.Dst)
 	}
+	args = append(args, "--chdir", workingDir, "--die-with-parent")
 	args = append(args, cmdline...)
-	return n.bwrapBin, args
+	return args
 }
 
 // Leave is a no-op retained for interface compatibility.
@@ -90,12 +111,65 @@ func (n *Namespace) Command(fuseMountDir, containerPath, workingDir string, cmdl
 func (n *Namespace) Leave() {}
 
 // FormatEnv builds the environment slice for the child process,
-// injecting machineproxy-specific variables needed by the shim.
-func FormatEnv(base []string, brokerSock, shimPath string) []string {
-	env := append([]string{}, base...)
+// injecting machineproxy-specific variables needed by the shim. When
+// pathInj.Dir is set, it is prepended or appended to PATH (creating a
+// PATH if none exists in base) so the FUSE-backed stub directory is
+// resolved by the shell's PATH search.
+func FormatEnv(base []string, brokerSock, shimPath string, pathInj PathInjection) []string {
+	env := make([]string, 0, len(base)+2)
+	env = append(env, base...)
+	if pathInj.Dir != "" {
+		env = injectPath(env, pathInj.Dir, pathInj.Position)
+	}
 	env = append(env,
 		"MPROXY_BROKER_SOCK="+brokerSock,
 		"MPROXY_SHIM_PATH="+shimPath,
 	)
 	return env
+}
+
+// injectPath splices dir into the PATH entry of env, creating one if
+// absent. position == "append" puts dir at the end; anything else
+// (including "" and "prepend") puts it at the start.
+func injectPath(env []string, dir, position string) []string {
+	prepend := position != "append"
+	for i, entry := range env {
+		if !strings.HasPrefix(entry, "PATH=") {
+			continue
+		}
+		current := entry[len("PATH="):]
+		if containsPathSegment(current, dir) {
+			return env
+		}
+		if current == "" {
+			env[i] = "PATH=" + dir
+			return env
+		}
+		if prepend {
+			env[i] = "PATH=" + dir + ":" + current
+		} else {
+			env[i] = "PATH=" + current + ":" + dir
+		}
+		return env
+	}
+	// No existing PATH; create one. Include a sane default fallback so
+	// shells that rely on $PATH being non-trivial still work.
+	if prepend {
+		env = append(env, "PATH="+dir+":"+defaultPath)
+	} else {
+		env = append(env, "PATH="+defaultPath+":"+dir)
+	}
+	return env
+}
+
+func containsPathSegment(path, dir string) bool {
+	if path == "" {
+		return false
+	}
+	for _, p := range strings.Split(path, ":") {
+		if p == dir {
+			return true
+		}
+	}
+	return false
 }

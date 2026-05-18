@@ -25,13 +25,21 @@ type Launcher interface {
 	RunChild(ctx context.Context, cmd []string) error
 }
 
+// PathStubs is optional. When provided it runs between the workspace
+// FUSE mount and the broker start, building the read-only stub directory
+// that fronts remote-PATH executables.
+type PathStubs interface {
+	BuildPathStubs(ctx context.Context) error
+}
+
 type Deps struct {
-	SSH      SSH
-	NS       Namespace
-	FS       WorkspaceFS
-	Broker   Broker
-	Launcher Launcher
-	Log      *slog.Logger
+	SSH       SSH
+	NS        Namespace
+	FS        WorkspaceFS
+	PathStubs PathStubs // optional
+	Broker    Broker
+	Launcher  Launcher
+	Log       *slog.Logger
 }
 
 type Supervisor struct {
@@ -46,22 +54,28 @@ func New(deps Deps) *Supervisor {
 }
 
 func (s *Supervisor) Run(ctx context.Context, cmd []string) error {
-	s.deps.Log.Debug("step 1/5: starting ssh")
+	s.deps.Log.Debug("step 1/6: starting ssh")
 	if err := s.deps.SSH.StartSSH(ctx); err != nil {
 		return err
 	}
-	s.deps.Log.Debug("step 2/5: entering namespace")
+	s.deps.Log.Debug("step 2/6: entering namespace")
 	if err := s.deps.NS.EnterNamespace(ctx); err != nil {
 		return err
 	}
-	s.deps.Log.Debug("step 3/5: mounting workspace")
+	s.deps.Log.Debug("step 3/6: mounting workspace")
 	if err := s.deps.FS.MountWorkspace(ctx); err != nil {
 		return err
 	}
-	s.deps.Log.Debug("step 4/5: starting broker")
+	if s.deps.PathStubs != nil {
+		s.deps.Log.Debug("step 4/6: building path stubs")
+		if err := s.deps.PathStubs.BuildPathStubs(ctx); err != nil {
+			return err
+		}
+	}
+	s.deps.Log.Debug("step 5/6: starting broker")
 	if err := s.deps.Broker.StartBroker(ctx); err != nil {
 		return err
 	}
-	s.deps.Log.Debug("step 5/5: running child", "command", cmd)
+	s.deps.Log.Debug("step 6/6: running child", "command", cmd)
 	return s.deps.Launcher.RunChild(ctx, cmd)
 }

@@ -59,12 +59,13 @@ func run() error {
 	defer deps.Close()
 
 	sup := supervisor.New(supervisor.Deps{
-		SSH:      deps,
-		NS:       deps,
-		FS:       deps,
-		Broker:   deps,
-		Launcher: deps,
-		Log:      log,
+		SSH:       deps,
+		NS:        deps,
+		FS:        deps,
+		PathStubs: deps,
+		Broker:    deps,
+		Launcher:  deps,
+		Log:       log,
 	})
 
 	return sup.Run(context.Background(), flag.Args())

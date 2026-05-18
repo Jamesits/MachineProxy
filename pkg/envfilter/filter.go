@@ -105,6 +105,37 @@ func Remove(env []string, remove []string) []string {
 	return out
 }
 
+// StripPathSegment returns a copy of env with `dir` removed from any
+// PATH= entry. Useful when forwarding env to a remote process that has
+// no use for a local-only directory (e.g. the path-stub mount). If the
+// segment isn't present, env is returned unchanged. If removing it
+// empties PATH, the PATH entry is dropped entirely.
+func StripPathSegment(env []string, dir string) []string {
+	if dir == "" {
+		return env
+	}
+	out := make([]string, 0, len(env))
+	for _, entry := range env {
+		if !strings.HasPrefix(entry, "PATH=") {
+			out = append(out, entry)
+			continue
+		}
+		val := entry[len("PATH="):]
+		segs := strings.Split(val, ":")
+		kept := segs[:0]
+		for _, s := range segs {
+			if s != dir {
+				kept = append(kept, s)
+			}
+		}
+		if len(kept) == 0 {
+			continue // drop the PATH entry entirely
+		}
+		out = append(out, "PATH="+strings.Join(kept, ":"))
+	}
+	return out
+}
+
 func filterCompiled(env []string, keep []matcher, remove []matcher) []string {
 	changed := parseChangedEnvs(env)
 

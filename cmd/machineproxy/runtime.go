@@ -22,6 +22,7 @@ import (
 	"github.com/jamesits/machineproxy/pkg/envfilter"
 	"github.com/jamesits/machineproxy/pkg/logging"
 	"github.com/jamesits/machineproxy/pkg/ns"
+	"github.com/jamesits/machineproxy/pkg/pathstub"
 	"github.com/jamesits/machineproxy/pkg/remoteexec"
 	"github.com/jamesits/machineproxy/pkg/sshconn"
 	"github.com/jamesits/machineproxy/pkg/workspacefs"
@@ -40,6 +41,14 @@ type runtimeDeps struct {
 	recorder        *agentproto.Recorder
 	brokerSocket    string // auto-generated temp socket path
 	brokerSocketDir string // private directory containing broker socket
+
+	// Path-stub state. pathStubServer/MountDir are populated only when
+	// cfg.Container.PathProxy is "prepend" or "append" and the
+	// enumeration succeeded. stubEntries maps stub name → remote path
+	// for the broker's PathMapper composition.
+	pathStubServer   *fuse.Server
+	pathStubMountDir string
+	stubEntries      map[string]pathstub.Entry
 
 	brokerCtxCancel context.CancelFunc
 }
@@ -89,6 +98,18 @@ func (d *runtimeDeps) Close() {
 			d.log.Warn("failed to remove broker socket dir", "error", err)
 		}
 		d.brokerSocketDir = ""
+	}
+	if d.pathStubServer != nil {
+		if err := d.pathStubServer.Unmount(); err != nil {
+			d.log.Warn("failed to unmount path-stub fuse", "error", err)
+		}
+		d.pathStubServer = nil
+	}
+	if d.pathStubMountDir != "" {
+		if err := os.RemoveAll(d.pathStubMountDir); err != nil {
+			d.log.Warn("failed to remove path-stub mount dir", "error", err)
+		}
+		d.pathStubMountDir = ""
 	}
 	if d.fuseServer != nil {
 		if err := d.fuseServer.Unmount(); err != nil {
@@ -215,6 +236,114 @@ func (d *runtimeDeps) MountWorkspace(ctx context.Context) error {
 	return nil
 }
 
+// BuildPathStubs enumerates remote PATH executables and mounts a
+// read-only FUSE directory that surfaces them locally. It is a no-op
+// when path_proxy is "disabled" or enumeration produced no entries.
+func (d *runtimeDeps) BuildPathStubs(ctx context.Context) error {
+	if d.cfg.Container.PathProxy == "disabled" {
+		d.log.Debug("path proxy disabled; skipping enumeration")
+		return nil
+	}
+
+	d.log.Log(ctx, logging.LevelTrace, "enumerating remote PATH")
+
+	agentLocalPath, err := config.ResolveAgentBinaryPath(
+		d.cfg.Components.AgentLocalPath,
+		d.cfg.Remote.OS,
+		d.cfg.Remote.Arch,
+	)
+	if err != nil {
+		return fmt.Errorf("resolve agent binary: %w", err)
+	}
+
+	sftpRaw := d.sshManager.SFTP()
+	sftpClient, ok := sftpRaw.(*sftp.Client)
+	if !ok {
+		return fmt.Errorf("sftp client is not *sftp.Client for path stub enumeration")
+	}
+
+	transferer := agenttransfer.New(
+		func() *sftp.Client { return sftpClient },
+		agentLocalPath,
+		d.cfg.Components.AgentRemotePath,
+		d.log.With("component", "transfer"),
+	)
+
+	runner := &remoteexec.AgentRunner{
+		Provider:   d.sshManager,
+		Transferer: transferer,
+		AgentConfig: &agentproto.AgentConfig{
+			EnvKeep:   d.cfg.Agent.EnvKeep,
+			EnvRemove: d.cfg.Agent.EnvRemove,
+		},
+		Log: d.log.With("component", "pathstub-runner"),
+	}
+
+	entries, err := runner.EnumeratePaths(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("enumerate remote PATH: %w", err)
+	}
+	d.log.Debug("path enumeration returned entries", "count", len(entries))
+
+	// Drop names that local_commands routes locally. Without this the
+	// tracer would whitelist the stub and try to run a remote ELF as a
+	// local binary, which is rarely what the user wants.
+	totalEntries := len(entries)
+	filtered := pathstub.FilterLocalCommands(entries, d.cfg.Container.LocalCommands)
+	if skipped := totalEntries - len(filtered); skipped > 0 {
+		d.log.Debug("path stubs shadowed by local_commands", "skipped", skipped)
+	}
+
+	if len(filtered) == 0 {
+		d.log.Info("path proxy: no remote executables to mount")
+		return nil
+	}
+
+	tmpDir, err := os.MkdirTemp("", "machineproxy-pathstub-*")
+	if err != nil {
+		return fmt.Errorf("create temp mountpoint: %w", err)
+	}
+	d.pathStubMountDir = tmpDir
+
+	success := false
+	defer func() {
+		if success {
+			return
+		}
+		if d.pathStubServer != nil {
+			if uerr := d.pathStubServer.Unmount(); uerr != nil {
+				d.log.Warn("failed to unmount path-stub fuse after mount error", "error", uerr)
+			}
+			d.pathStubServer = nil
+		}
+		if rerr := os.RemoveAll(tmpDir); rerr != nil {
+			d.log.Warn("failed to remove path-stub mount dir after mount error", "error", rerr)
+		}
+		d.pathStubMountDir = ""
+	}()
+
+	fsLog := d.log.With("component", "pathstub-fuse")
+	backend := pathstub.New(&pathstubOpener{c: sftpClient}, filtered, fsLog)
+	server, err := pathstub.Mount(ctx, backend, tmpDir)
+	if err != nil {
+		return fmt.Errorf("mount path-stub fuse: %w", err)
+	}
+	d.pathStubServer = server
+	d.stubEntries = backend.Entries()
+	d.log.Debug("path stubs mounted", "count", len(filtered), "mount_dir", tmpDir)
+	success = true
+	return nil
+}
+
+// pathstubOpener adapts *sftp.Client.Open (which returns *sftp.File) to
+// pathstub.RemoteOpener (which requires RemoteFile). Go's interface
+// satisfaction is invariant in return types, hence the trivial wrapper.
+type pathstubOpener struct{ c *sftp.Client }
+
+func (o *pathstubOpener) Open(path string) (pathstub.RemoteFile, error) {
+	return o.c.Open(path)
+}
+
 func (d *runtimeDeps) StartBroker(ctx context.Context) error {
 	// Keep the broker socket in a private directory so only this user can
 	// connect to the control channel that can launch remote commands.
@@ -277,18 +406,33 @@ func (d *runtimeDeps) StartBroker(ctx context.Context) error {
 
 	// Build a path mapper that rewrites container-local paths to remote
 	// paths so the agent can chdir and exec correctly on the remote host.
+	// Two prefixes can be rewritten:
+	//   - the workspace mount   (containerPath → remotePath)
+	//   - the path-stub mount   (<stub_dir>/<name> → real remote binary)
 	mount, _ := config.ParseMount(d.cfg.Container.Mounts[0])
+	containerPrefix := mount.ContainerPath
+	remotePrefix := mount.RemotePath
+	stubPrefix := pathstub.ContainerMountPath
+	stubMap := d.stubEntries // nil when path proxy is disabled or empty
+
+	hasWorkspaceRewrite := containerPrefix != remotePrefix
+	hasStubRewrite := len(stubMap) > 0
 	var pathMapper func(string) string
-	if mount.ContainerPath != mount.RemotePath {
-		containerPrefix := mount.ContainerPath
-		remotePrefix := mount.RemotePath
+	if hasWorkspaceRewrite || hasStubRewrite {
 		pathMapper = func(p string) string {
-			if p == containerPrefix {
-				return remotePrefix
+			if hasStubRewrite && strings.HasPrefix(p, stubPrefix+"/") {
+				name := p[len(stubPrefix)+1:]
+				if e, ok := stubMap[name]; ok {
+					return e.RemotePath
+				}
 			}
-			// Match containerPrefix/ to avoid partial prefix matches.
-			if strings.HasPrefix(p, containerPrefix+"/") {
-				return remotePrefix + p[len(containerPrefix):]
+			if hasWorkspaceRewrite {
+				if p == containerPrefix {
+					return remotePrefix
+				}
+				if strings.HasPrefix(p, containerPrefix+"/") {
+					return remotePrefix + p[len(containerPrefix):]
+				}
 			}
 			return p
 		}
@@ -297,6 +441,12 @@ func (d *runtimeDeps) StartBroker(ctx context.Context) error {
 	brokerLog := d.log.With("component", "broker")
 	envKeep := d.cfg.Agent.EnvKeep
 	envRemove := d.cfg.Agent.EnvRemove
+	// stripStub removes the local stub mount from PATH before the agent
+	// runs the remote child — the remote machine has no such directory.
+	stripStub := stubPrefix
+	if !hasStubRewrite {
+		stripStub = ""
+	}
 	d.bkr = broker.NewServer(broker.Deps{
 		Remote: &remoteexec.AgentRunner{
 			Provider:   d.sshManager,
@@ -309,7 +459,8 @@ func (d *runtimeDeps) StartBroker(ctx context.Context) error {
 			Log: d.log.With("component", "runner"),
 		},
 		EnvFilter: func(env []string) []string {
-			return envfilter.Filter(env, envKeep, envRemove)
+			filtered := envfilter.Filter(env, envKeep, envRemove)
+			return envfilter.StripPathSegment(filtered, stripStub)
 		},
 		PathMapper: pathMapper,
 		Log:        brokerLog,
@@ -373,10 +524,18 @@ func (d *runtimeDeps) RunChild(ctx context.Context, cmdline []string) error {
 	}
 	d.log.Log(ctx, logging.LevelTrace, "resolved shim binary", "path", shimBin)
 
+	pathInj := ns.PathInjection{}
+	if d.pathStubMountDir != "" {
+		pathInj = ns.PathInjection{
+			Dir:      pathstub.ContainerMountPath,
+			Position: d.cfg.Container.PathProxy,
+		}
+	}
 	env := ns.FormatEnv(
 		os.Environ(),
 		d.brokerSocket,
 		shimBin,
+		pathInj,
 	)
 
 	// Strip env vars that should not leak into the container process.
@@ -389,6 +548,11 @@ func (d *runtimeDeps) RunChild(ctx context.Context, cmdline []string) error {
 	workingDir := d.cfg.Container.WorkingDir
 	if workingDir == "" {
 		workingDir = mount.ContainerPath
+	}
+
+	binds := []ns.Bind{{Src: d.fuseMountDir, Dst: mount.ContainerPath}}
+	if d.pathStubMountDir != "" {
+		binds = append(binds, ns.Bind{Src: d.pathStubMountDir, Dst: pathstub.ContainerMountPath})
 	}
 
 	// Wrap the command in the ptrace-based tracer so exec interception
@@ -406,7 +570,7 @@ func (d *runtimeDeps) RunChild(ctx context.Context, cmdline []string) error {
 	tracerArgs = append(tracerArgs, cmdline...)
 
 	d.log.Log(ctx, logging.LevelTrace, "launching child via tracer", "tracer", tracerBin, "command", cmdline)
-	return d.namespace.Run(ctx, d.fuseMountDir, mount.ContainerPath, workingDir, tracerArgs, env)
+	return d.namespace.Run(ctx, workingDir, tracerArgs, env, binds)
 }
 
 func currentUsername() (string, error) {

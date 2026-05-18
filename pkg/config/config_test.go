@@ -314,6 +314,70 @@ func TestParseMountRejectsEmpty(t *testing.T) {
 	}
 }
 
+func TestLoadDefaultsPathProxy(t *testing.T) {
+	raw := `
+remote:
+  ssh:
+    host: 127.0.0.1
+    user: dev
+container:
+  local_commands:
+    - /usr/bin/env
+  mounts:
+    - /workspace
+`
+	cfg, err := Load(strings.NewReader(raw))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Container.PathProxy != "prepend" {
+		t.Fatalf("expected default path_proxy=prepend, got %q", cfg.Container.PathProxy)
+	}
+}
+
+func TestLoadAcceptsPathProxyValues(t *testing.T) {
+	for _, v := range []string{"prepend", "append", "disabled"} {
+		raw := `
+remote:
+  ssh:
+    host: 127.0.0.1
+    user: dev
+container:
+  local_commands:
+    - /usr/bin/env
+  mounts:
+    - /workspace
+  path_proxy: ` + v + `
+`
+		cfg, err := Load(strings.NewReader(raw))
+		if err != nil {
+			t.Fatalf("Load(%q) error = %v", v, err)
+		}
+		if cfg.Container.PathProxy != v {
+			t.Fatalf("expected path_proxy=%q, got %q", v, cfg.Container.PathProxy)
+		}
+	}
+}
+
+func TestLoadRejectsPathProxyValue(t *testing.T) {
+	raw := `
+remote:
+  ssh:
+    host: 127.0.0.1
+    user: dev
+container:
+  local_commands:
+    - /usr/bin/env
+  mounts:
+    - /workspace
+  path_proxy: yolo
+`
+	_, err := Load(strings.NewReader(raw))
+	if err == nil || !strings.Contains(err.Error(), "path_proxy") {
+		t.Fatalf("expected path_proxy validation error, got: %v", err)
+	}
+}
+
 func TestLoadRejectsEmptyMounts(t *testing.T) {
 	raw := `
 remote:

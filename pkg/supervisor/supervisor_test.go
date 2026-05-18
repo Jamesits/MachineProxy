@@ -26,6 +26,27 @@ func TestSupervisorStartsNamespaceMountBrokerAndChildInOrder(t *testing.T) {
 	}
 }
 
+func TestSupervisorRunsPathStubsBetweenFuseAndBroker(t *testing.T) {
+	f := &fakeDeps{}
+	s := New(Deps{
+		SSH:       f,
+		NS:        f,
+		FS:        f,
+		PathStubs: f,
+		Broker:    f,
+		Launcher:  f,
+	})
+
+	if err := s.Run(context.Background(), []string{"/usr/bin/make", "test"}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	want := []string{"ssh", "namespace", "fuse", "pathstubs", "broker", "child"}
+	if !reflect.DeepEqual(f.calls, want) {
+		t.Fatalf("call order = %#v, want %#v", f.calls, want)
+	}
+}
+
 type fakeDeps struct {
 	calls []string
 }
@@ -42,6 +63,11 @@ func (f *fakeDeps) EnterNamespace(context.Context) error {
 
 func (f *fakeDeps) MountWorkspace(context.Context) error {
 	f.calls = append(f.calls, "fuse")
+	return nil
+}
+
+func (f *fakeDeps) BuildPathStubs(context.Context) error {
+	f.calls = append(f.calls, "pathstubs")
 	return nil
 }
 

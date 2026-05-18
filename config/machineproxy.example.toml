@@ -45,6 +45,14 @@ env_remove = [
     "VSCODE_*",
 ]
 
+# Path proxy: mount a FUSE directory containing one stub per remote-PATH
+# executable, and splice it into the container's PATH. Exec'ing a stub
+# transparently runs the corresponding binary on the remote machine.
+#   "prepend"  — stubs win over locally-installed binaries (default)
+#   "append"   — local binaries win; stubs only fill gaps
+#   "disabled" — skip enumeration entirely
+path_proxy = "prepend"
+
 # Agent env filtering controls which variables are forwarded to the remote.
 # Env vars added or changed by the parent process (after the hook is loaded)
 # are always forwarded. For inherited (unchanged) vars, only those matching

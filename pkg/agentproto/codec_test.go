@@ -48,6 +48,23 @@ func TestCodecRoundtrip(t *testing.T) {
 			name:  "error",
 			frame: Frame{Type: FrameError, Error: "something broke"},
 		},
+		{
+			name: "path_query",
+			frame: Frame{
+				Type:  FramePathQuery,
+				Query: &PathQuery{Paths: []string{"/usr/bin", "/bin"}},
+			},
+		},
+		{
+			name: "path_info",
+			frame: Frame{
+				Type: FramePathInfo,
+				Info: &PathInfo{Entries: []PathInfoEntry{
+					{Name: "ls", RemotePath: "/usr/bin/ls", Mode: 0o755, Size: 1234, MTimeNanos: 17_000_000_000},
+					{Name: "bash", RemotePath: "/usr/bin/bash", Mode: 0o755, Size: 5678},
+				}},
+			},
+		},
 	}
 
 	for _, tc := range cases {
@@ -88,6 +105,33 @@ func TestCodecRoundtrip(t *testing.T) {
 				}
 				if got.Exec.Path != tc.frame.Exec.Path {
 					t.Errorf("Exec.Path: got %q, want %q", got.Exec.Path, tc.frame.Exec.Path)
+				}
+			}
+			if tc.frame.Query != nil {
+				if got.Query == nil {
+					t.Fatal("Query is nil")
+				}
+				if len(got.Query.Paths) != len(tc.frame.Query.Paths) {
+					t.Fatalf("Query.Paths len: got %d, want %d", len(got.Query.Paths), len(tc.frame.Query.Paths))
+				}
+				for i := range tc.frame.Query.Paths {
+					if got.Query.Paths[i] != tc.frame.Query.Paths[i] {
+						t.Errorf("Query.Paths[%d]: got %q, want %q", i, got.Query.Paths[i], tc.frame.Query.Paths[i])
+					}
+				}
+			}
+			if tc.frame.Info != nil {
+				if got.Info == nil {
+					t.Fatal("Info is nil")
+				}
+				if len(got.Info.Entries) != len(tc.frame.Info.Entries) {
+					t.Fatalf("Info.Entries len: got %d, want %d", len(got.Info.Entries), len(tc.frame.Info.Entries))
+				}
+				for i, want := range tc.frame.Info.Entries {
+					gotEntry := got.Info.Entries[i]
+					if gotEntry != want {
+						t.Errorf("Info.Entries[%d]: got %+v, want %+v", i, gotEntry, want)
+					}
 				}
 			}
 		})

@@ -230,3 +230,56 @@ func TestFilter_InvalidRegexSkipped(t *testing.T) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 }
+
+func TestStripPathSegment_PrependedSegmentRemoved(t *testing.T) {
+	env := []string{"HOME=/home/test", "PATH=/stub:/usr/bin:/bin"}
+	got := StripPathSegment(env, "/stub")
+	want := []string{"HOME=/home/test", "PATH=/usr/bin:/bin"}
+	if !slices.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestStripPathSegment_AppendedSegmentRemoved(t *testing.T) {
+	env := []string{"PATH=/usr/bin:/bin:/stub"}
+	got := StripPathSegment(env, "/stub")
+	want := []string{"PATH=/usr/bin:/bin"}
+	if !slices.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestStripPathSegment_MidSegmentRemoved(t *testing.T) {
+	env := []string{"PATH=/usr/bin:/stub:/bin"}
+	got := StripPathSegment(env, "/stub")
+	want := []string{"PATH=/usr/bin:/bin"}
+	if !slices.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestStripPathSegment_NoMatchUnchanged(t *testing.T) {
+	env := []string{"PATH=/usr/bin:/bin"}
+	got := StripPathSegment(env, "/stub")
+	want := []string{"PATH=/usr/bin:/bin"}
+	if !slices.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestStripPathSegment_DropsEmptyPath(t *testing.T) {
+	env := []string{"HOME=/home/test", "PATH=/stub"}
+	got := StripPathSegment(env, "/stub")
+	want := []string{"HOME=/home/test"}
+	if !slices.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestStripPathSegment_EmptyDirNoop(t *testing.T) {
+	env := []string{"PATH=/usr/bin"}
+	got := StripPathSegment(env, "")
+	if !slices.Equal(got, env) {
+		t.Errorf("got %v, want %v", got, env)
+	}
+}
