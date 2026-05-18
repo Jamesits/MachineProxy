@@ -125,7 +125,7 @@ machineproxy [other args] /usr/bin/node "$(which amp)" --no-ide
 
 ### Pipe Performance
 
-If you try to pipe things across the machine boundary, the pipe goes through the SSH connection twice. This is the case as long as the process setting up the pipe is run locally, even if both the sender and the receiver runs on the remote machine.
+If the process setting up the pipe runs locally, and both the pipe sender and the receiver runs on the remote machine, the pipe goes through the SSH connection twice.
 
 <details>
   <summary>Claude's explanation</summary>
