@@ -75,6 +75,10 @@ func run(rawArgs []string) error {
 			}
 		case remote.TypeDocker:
 			cfg.Remote.Docker.Container = dst.Host
+		case remote.TypeCompose:
+			cfg.Remote.Compose.Project = dst.Host
+			cfg.Remote.Compose.Service = dst.Service
+			cfg.Remote.Compose.Sequence = dst.Sequence
 		}
 	}
 

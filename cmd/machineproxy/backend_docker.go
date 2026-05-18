@@ -19,4 +19,10 @@ func init() {
 			Log:       log.With("component", "docker"),
 		})
 	})
+	registerBackend("compose", func(ctx context.Context, cfg *config.Config, log *slog.Logger) (remote.Backend, error) {
+		return remotedocker.NewFromCompose(ctx, remotedocker.Config{
+			Host: cfg.Remote.Compose.Host,
+			Log:  log.With("component", "compose"),
+		}, cfg.Remote.Compose.Project, cfg.Remote.Compose.Service, cfg.Remote.Compose.Sequence)
+	})
 }

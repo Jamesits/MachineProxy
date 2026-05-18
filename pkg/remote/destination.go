@@ -11,19 +11,28 @@ import (
 //
 // SSH form:     ssh://[user@]host[:port]   or bare [user@]host
 // Docker form:  docker://container_name_or_id
+// Compose form: compose://project/service[/sequence]
+//
+//	project may be "." to auto-detect from the working directory.
 //
 // A bare string with no scheme prefix defaults to defaultType passed to
 // ParseDestination — typically the value of --backend.
 type Destination struct {
 	Type Type
-	// User is the SSH user, when present. Empty for Docker and for SSH
-	// destinations that do not carry an explicit user.
+	// User is the SSH user, when present. Empty for Docker/Compose and for
+	// SSH destinations that do not carry an explicit user.
 	User string
-	// Host is the SSH hostname/IP for type=ssh, or the container
-	// name/ID for type=docker.
+	// Host is the SSH hostname/IP for type=ssh, the container name/ID for
+	// type=docker, or the Compose project name for type=compose ("." = current).
 	Host string
-	// Port is the SSH port, zero when not specified. Unused for docker.
+	// Port is the SSH port, zero when not specified. Unused for docker/compose.
 	Port int
+	// Service is the Docker Compose service name for type=compose.
+	// Empty for ssh and docker.
+	Service string
+	// Sequence is the 1-based replica index for type=compose. Zero means
+	// "unspecified — expect exactly one running match". Unused for ssh/docker.
+	Sequence int
 	// Raw is the original input string.
 	Raw string
 }
@@ -46,8 +55,10 @@ func ParseDestination(s string, defaultType Type) (Destination, error) {
 			t = TypeSSH
 		case TypeDocker:
 			t = TypeDocker
+		case TypeCompose:
+			t = TypeCompose
 		default:
-			return Destination{}, fmt.Errorf("unknown destination scheme %q (want ssh:// or docker://)", scheme)
+			return Destination{}, fmt.Errorf("unknown destination scheme %q (want ssh://, docker://, or compose://)", scheme)
 		}
 	}
 	if t == "" {
@@ -68,6 +79,10 @@ func ParseDestination(s string, defaultType Type) (Destination, error) {
 			return Destination{}, fmt.Errorf("docker destination %q contains an invalid character", rest)
 		}
 		dst.Host = rest
+	case TypeCompose:
+		if err := parseComposeTarget(rest, &dst); err != nil {
+			return Destination{}, err
+		}
 	default:
 		return Destination{}, fmt.Errorf("unknown backend type %q", t)
 	}
@@ -116,6 +131,50 @@ func parseSSHTarget(s string, dst *Destination) error {
 	if dst.Host == "" {
 		return errors.New("ssh destination must include a host")
 	}
+	return nil
+}
+
+// parseComposeTarget splits "project/service[/N]" into the components of dst.
+// project may be "." to request auto-detection from the working directory.
+// N is a 1-based replica sequence number; omitting it leaves Sequence at 0
+// (meaning "expect exactly one running match").
+func parseComposeTarget(s string, dst *Destination) error {
+	if s == "" {
+		return fmt.Errorf("compose destination %q must be project/service[/N] form", dst.Raw)
+	}
+	// Split off the project (everything before the first slash).
+	i := strings.Index(s, "/")
+	if i < 0 {
+		return fmt.Errorf("compose destination %q must be project/service[/N] form", dst.Raw)
+	}
+	project := s[:i]
+	rest := s[i+1:]
+	if project == "" {
+		return fmt.Errorf("compose destination %q: project name must not be empty", dst.Raw)
+	}
+	if strings.ContainsAny(project, "@:") {
+		return fmt.Errorf("compose destination %q: project name contains invalid characters", dst.Raw)
+	}
+
+	// Split rest into service and optional sequence.
+	service := rest
+	if j := strings.Index(rest, "/"); j >= 0 {
+		service = rest[:j]
+		seq := rest[j+1:]
+		n, err := strconv.Atoi(seq)
+		if err != nil || n < 1 {
+			return fmt.Errorf("compose destination %q: sequence %q must be a positive integer", dst.Raw, seq)
+		}
+		dst.Sequence = n
+	}
+	if service == "" {
+		return fmt.Errorf("compose destination %q: service name must not be empty", dst.Raw)
+	}
+	if strings.ContainsAny(service, "@:/") {
+		return fmt.Errorf("compose destination %q: service name contains invalid characters", dst.Raw)
+	}
+	dst.Host = project
+	dst.Service = service
 	return nil
 }
 

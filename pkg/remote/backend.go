@@ -14,8 +14,9 @@ import (
 type Type string
 
 const (
-	TypeSSH    Type = "ssh"
-	TypeDocker Type = "docker"
+	TypeSSH     Type = "ssh"
+	TypeDocker  Type = "docker"
+	TypeCompose Type = "compose"
 )
 
 // PlatformInfo describes the remote machine's OS, architecture, and

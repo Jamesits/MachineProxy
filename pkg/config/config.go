@@ -87,6 +87,17 @@ type Config struct {
 			Container string `yaml:"container" toml:"container" json:"container"`
 			Host      string `yaml:"host" toml:"host" json:"host"`
 		} `yaml:"docker" toml:"docker" json:"docker"`
+		// Compose selects a running container by Docker Compose project and
+		// service name. Project "." resolves from the working directory.
+		// Sequence (1-based) picks a specific replica of a scaled service;
+		// 0 means auto (errors if more than one container matches).
+		// Host, when set, overrides the DOCKER_HOST env var.
+		Compose struct {
+			Project  string `yaml:"project"  toml:"project"  json:"project"`
+			Service  string `yaml:"service"  toml:"service"  json:"service"`
+			Sequence int    `yaml:"sequence" toml:"sequence" json:"sequence"`
+			Host     string `yaml:"host"     toml:"host"     json:"host"`
+		} `yaml:"compose" toml:"compose" json:"compose"`
 		// OS selects the remote-side agent binary's GOOS. When empty,
 		// the runtime first asks the backend to detect it and only
 		// falls back to the local runtime.GOOS if detection fails.
@@ -249,8 +260,15 @@ func (c *Config) Validate() error {
 		if c.Remote.Docker.Container == "" {
 			return errors.New("remote.docker.container is required when remote.type=docker")
 		}
+	case "compose":
+		if c.Remote.Compose.Service == "" {
+			return errors.New("remote.compose.service is required when remote.type=compose")
+		}
+		if c.Remote.Compose.Sequence < 0 {
+			return fmt.Errorf("remote.compose.sequence must be >= 0; got %d", c.Remote.Compose.Sequence)
+		}
 	default:
-		return fmt.Errorf("remote.type must be one of ssh, docker; got %q", c.Remote.Type)
+		return fmt.Errorf("remote.type must be one of ssh, docker, compose; got %q", c.Remote.Type)
 	}
 	if len(c.Container.Mounts) == 0 {
 		return errors.New("container.mounts must not be empty")

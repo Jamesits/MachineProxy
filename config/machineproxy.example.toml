@@ -2,9 +2,9 @@
 log_level = "info"
 
 [remote]
-# Backend selector: "ssh" (default) or "docker". The CLI --backend
-# flag and scheme-prefixed destinations (ssh://, docker://) override
-# this at runtime.
+# Backend selector: "ssh" (default), "docker", or "compose". The CLI
+# --backend flag and scheme-prefixed destinations (ssh://, docker://,
+# compose://) override this at runtime.
 # type = "ssh"
 # Remote host OS and architecture used to select the agent binary.
 # If unset, an auto detection will be tried; if auto detection fails,
@@ -29,6 +29,21 @@ host = "remote.server.example.com"
 # (DOCKER_HOST, DOCKER_API_VERSION, DOCKER_TLS_VERIFY, DOCKER_CERT_PATH);
 # set host below to override DOCKER_HOST for this invocation only.
 # container = "my-dev-box"
+# host = "unix:///var/run/docker.sock"
+
+# [remote.compose]
+# Attach to a running Docker Compose service container. Equivalent to
+# using a compose://project/service[/sequence] destination on the CLI.
+# project: Compose project name, or "." to auto-detect from the current
+#   working directory (checks COMPOSE_PROJECT_NAME, then the "name:"
+#   field in compose.yaml/docker-compose.yaml, then the directory name).
+# service: Compose service name (required).
+# sequence: 1-based replica index for scaled services; 0 (default) means
+#   auto — machineproxy errors if more than one container matches.
+# host: optional override for DOCKER_HOST.
+# project = "."
+# service = "dev"
+# sequence = 0
 # host = "unix:///var/run/docker.sock"
 
 [container]

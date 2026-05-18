@@ -56,8 +56,16 @@ machineproxy [-p port] [[user@]hostname] -- <program>
 ### Docker
 
 ```shell
-machineproxy -v "$(pwd):/workspace" docker://container_id -- <program>
+machineproxy -v "$(pwd):/workspace" docker://container_name -- <program>
 ```
+
+Supported URL scheme:
+
+- `docker://container_id`
+- `docker://container_name`
+- `compose://project/service`: Attach to a service in a Docker Compose project
+- `compose://./service`: Attach to a service in the current Docker Compose project
+- `compose://project/service/id`: Attach to 
 
 ## Development
 
