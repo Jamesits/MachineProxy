@@ -90,6 +90,7 @@ func (t *Transferer) Ensure() (string, error) {
 		return "", fmt.Errorf("hash local agent binary: %w", err)
 	}
 	t.localHash = hash
+	t.log.Log(context.TODO(), logging.LevelTrace, "local agent hash", "path", t.localPath, "sha256", hash)
 
 	client, err := t.remoteClient()
 	if err != nil {
@@ -99,7 +100,13 @@ func (t *Transferer) Ensure() (string, error) {
 	// Check the remote binary itself. A sidecar hash marker in /tmp is not a
 	// trust boundary because other remote users may be able to write it.
 	// This still creates a TOCTOU possibility though.
-	if remoteHash, err := hashRemoteFile(client, t.remotePath); err == nil && remoteHash == hash {
+	remoteHash, remoteErr := hashRemoteFile(client, t.remotePath)
+	if remoteErr != nil {
+		t.log.Log(context.TODO(), logging.LevelTrace, "remote agent hash unavailable", "path", t.remotePath, "error", remoteErr)
+	} else {
+		t.log.Log(context.TODO(), logging.LevelTrace, "remote agent hash", "path", t.remotePath, "sha256", remoteHash)
+	}
+	if remoteErr == nil && remoteHash == hash {
 		t.log.Debug("agent binary hash matches, skipping upload", "hash", hash[:12])
 		t.transferred = true
 		return t.remotePath, nil
