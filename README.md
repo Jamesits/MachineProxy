@@ -92,9 +92,9 @@ This program aims to work around these problems.
 MachineProxy pros:
 
 - `@file` works
-- All native tools (read/write files, searching, executing programs or shell commands, etc.) behave normally
-- Harness-local file/code indexing still works
-- Local executables can call remote executables, and they can pipe data between them
+- All native tools (read/write files, searching, executing programs or shell commands, etc.) works
+- Harness-local file/code indexing works
+- Local executables can call remote executables, and they can pipe data in between
 
 "Just use SSH" pros:
 
