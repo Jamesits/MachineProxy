@@ -59,13 +59,13 @@ machineproxy [-p port] [[user@]hostname] -- <program>
 machineproxy -v "$(pwd):/workspace" docker://container_name -- <program>
 ```
 
-Supported URL scheme:
+Supported URL schemas:
 
 - `docker://container_id`
 - `docker://container_name`
 - `compose://project/service`: Attach to a service in a Docker Compose project
 - `compose://./service`: Attach to a service in the current Docker Compose project
-- `compose://project/service/id`: Attach to 
+- `compose://project/service/id`: Use this when you have multiple instances of a service
 
 ## Development
 
@@ -116,9 +116,9 @@ The program is launched with a quasi-remote environment.
 
 ### Compatibility, or how good it is
 
-MachineProxy supports Linux only, for both local and remote devices. Golang runtime requires Linux 3.2 or later; [support differs on different architectures](https://go.dev/wiki/MinimumRequirements#linuxlinux).
+Local device must be Linux. Golang runtime requires Linux 3.2 or later; [support differs on different architectures](https://go.dev/wiki/MinimumRequirements#linuxlinux).
 
-The MachineProxy remote agent (`mproxy-agent`) must be compiled for the remote device's architecture. The official packages contain `amd64` (v1) and `arm64` (v8) builds. If you need agents for other architectures or variants, you must compile them yourself. I can't test those builds because I don't have the hardware, so bugs might exist; bug reports and contributions are welcome.
+The remote agent (`mproxy-agent`) must be compiled for the remote device's OS and architecture. The official packages contain `amd64` (v1) and `arm64` (v8) builds. If you need agents for other architectures or variants, you must compile them yourself. I can't test those builds because I don't have the hardware, so bugs might exist; bug reports and contributions are welcome.
 
 MachineProxy is designed to work with most programs, including editors and CLI-based AI coding agents. Most use cases are covered, but edge cases exist and some may be impossible to fix completely.
 
