@@ -92,7 +92,7 @@ MachineProxy pros:
 
 - `@file` and harness-local file/code indexing works
 - All native tools (read/write files, searching, executing programs or shell commands, etc.) work
-- Local executables can call remote executables, and they can pipe data between each other
+- File descriptor inheritance and pipe works across the machine boundary
 - Works over both SSH and Docker
 
 "Just use SSH" pros:
