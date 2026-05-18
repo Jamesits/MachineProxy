@@ -47,7 +47,6 @@ mounts = [
 env_remove = [
     "AMP_*",
     "ANTHROPIC_*",
-    "MPROXY_*",
     "VSCODE_*",
 ]
 ```
@@ -124,6 +123,10 @@ DO NOT treat MachineProxy as a security barrier. Programs launched by MachinePro
 ### Mounts
 
 - DO NOT mount over your local home directory, otherwise your AI agents might not be able to read its config.
+
+### Environment Variables Filtering
+
+- DO NOT filter `MPROXY_*` in `container.env_remove`
 
 ### VSCode Terminal
 
