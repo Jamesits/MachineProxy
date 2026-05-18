@@ -84,6 +84,9 @@ func run(rawArgs []string) error {
 	} else {
 		log.Warn("failed to marshal config for trace log", "error", err)
 	}
+	if len(cfg.Container.LocalCommands) == 0 {
+		log.Debug("container.local_commands is empty; every exec will be forwarded to the remote")
+	}
 
 	if len(parsed.cmd) == 0 {
 		return fmt.Errorf("missing command to run")

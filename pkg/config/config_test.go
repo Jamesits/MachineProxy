@@ -7,7 +7,9 @@ import (
 	"testing"
 )
 
-func TestLoadRejectsEmptyLocalCommands(t *testing.T) {
+func TestLoadAcceptsEmptyLocalCommands(t *testing.T) {
+	// Empty local_commands is valid: it means every exec is routed to
+	// the remote. Minimal configs (e.g. those written by CI) rely on this.
 	raw := `
 remote:
   ssh:
@@ -19,9 +21,12 @@ container:
     - /workspace
 `
 
-	_, err := Load(strings.NewReader(raw))
-	if err == nil || !strings.Contains(err.Error(), "container.local_commands") {
-		t.Fatalf("expected local_commands validation error, got: %v", err)
+	cfg, err := Load(strings.NewReader(raw))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(cfg.Container.LocalCommands) != 0 {
+		t.Fatalf("expected empty local_commands, got: %#v", cfg.Container.LocalCommands)
 	}
 }
 

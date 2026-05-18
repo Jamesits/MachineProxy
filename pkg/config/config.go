@@ -219,9 +219,6 @@ func (c *Config) Validate() error {
 	if c.Container.WorkingDir != "" && !filepath.IsAbs(c.Container.WorkingDir) {
 		return errors.New("container.working_dir must be absolute")
 	}
-	if len(c.Container.LocalCommands) == 0 {
-		return errors.New("container.local_commands must not be empty")
-	}
 	for _, p := range c.Container.LocalCommands {
 		if _, err := CompileLocalCommand(p); err != nil {
 			return fmt.Errorf("container.local_commands: %w", err)

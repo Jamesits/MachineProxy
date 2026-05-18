@@ -8,9 +8,30 @@ It solves the last-hop problem for your AI agent, even when the target machine i
 ![Reviewed by a Human](https://img.shields.io/badge/Reviewed_by-a_Human-green)
 [![Go Reference](https://pkg.go.dev/badge/github.com/jamesits/machineproxy.svg)](https://pkg.go.dev/github.com/jamesits/machineproxy)
 
+## Demo
+
+Here's a simple demo with explanation of what happened on each command. We use `bash` for better demonstration; in real life you would run a real workload (e.g. `claude`).
+
+```shell
+# Enter a MachineProxy environment.
+# A bash from the workstation is executed, and everything else run by it will be sent to the remote host.
+ubuntu@workstation:~/temp$ machineproxy remote.host -- bash
+
+# Bash itself is running in the workstation, so if you instruct it to read a file, it reads the file from the workstation.
+# `grep` is a child process so it runs in the remote host; MachineProxy proxies the pipe between them.
+ubuntu@workstation:~/temp$ echo "$(</etc/os-release)" | grep PRETTY_NAME
+PRETTY_NAME="Ubuntu 26.04 LTS"
+
+# `cat` is a child process so it runs in the remote host and reads the file from the remote host.
+ubuntu@workstation:~/temp$ cat /etc/os-release | grep PRETTY_NAME
+PRETTY_NAME="Rocky Linux 8.10 (Green Obsidian)"
+```
+
 ## Usage
 
 Install [the latest package](https://github.com/Jamesits/MachineProxy/releases/latest) with your package manager of choice.
+
+Config `container.local_commands` in `/etc/machineproxy/machineproxy.toml` according to your needs.
 
 Create an empty directory on your local workstation at the same path as the remote workspace. If you can't, use `-v "$(pwd):/path/to/remote/workspace"` to map a different local path.
 
