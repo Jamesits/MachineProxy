@@ -47,6 +47,7 @@ jobs:
         uses: golangci/golangci-lint-action@v9
         with:
           version: latest
+          args: --build-tags backend_ssh,backend_docker
 
       - name: Upload deb packages
         uses: actions/upload-artifact@v4
