@@ -196,8 +196,13 @@ func streamFD(send func(broker.Frame), fdNum uint32, f *os.File) {
 	}
 }
 
-// detectExtraFDs finds open file descriptors beyond stdin/stdout/stderr,
-// excluding the broker socket itself.
+// detectExtraFDs finds open file descriptors beyond stdin/stdout/stderr that
+// were inherited from the target process, excluding the broker socket. FDs
+// marked FD_CLOEXEC are skipped: by convention they are not for inheritance,
+// and in production execve() would have already closed them before the shim
+// ran. The explicit check also keeps the shim isolated from the surrounding
+// process's own descriptors when Run is exercised in-process (e.g. unit tests),
+// where Go-opened sockets share the FD table.
 func detectExtraFDs(brokerConn net.Conn) []uint32 {
 	// Get the broker socket fd to exclude it.
 	var brokerFD uintptr
@@ -215,6 +220,10 @@ func detectExtraFDs(brokerConn net.Conn) []uint32 {
 		// Check if fd is valid by calling fstat.
 		var stat syscall.Stat_t
 		if err := syscall.Fstat(fd, &stat); err != nil {
+			continue
+		}
+		flags, _, errno := syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), syscall.F_GETFD, 0)
+		if errno != 0 || flags&syscall.FD_CLOEXEC != 0 {
 			continue
 		}
 		fds = append(fds, uint32(fd))

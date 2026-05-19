@@ -67,17 +67,23 @@ func TestRunNoOriginalArgvSendsNilArgv(t *testing.T) {
 	}
 	defer ln.Close()
 
-	var gotReq broker.ExecRequest
+	var (
+		gotReq    broker.ExecRequest
+		decodeErr error
+	)
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		conn, err := ln.Accept()
 		if err != nil {
+			decodeErr = err
 			return
 		}
 		defer conn.Close()
 
 		dec := broker.NewDecoder(conn)
 		enc := broker.NewEncoder(conn)
-		_ = dec.Decode(&gotReq)
+		decodeErr = dec.Decode(&gotReq)
 		_ = enc.Encode(broker.Frame{Stream: broker.StreamExit, Code: 0})
 	}()
 
@@ -86,6 +92,13 @@ func TestRunNoOriginalArgvSendsNilArgv(t *testing.T) {
 	code := Run([]string{"mproxy-shim", "/usr/bin/python3"}, bytes.NewBuffer(nil), &bytes.Buffer{}, &bytes.Buffer{})
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0", code)
+	}
+	// Wait for the server goroutine to finish so its writes to gotReq are
+	// synchronized with this goroutine's reads below. Without this, the Go
+	// memory model does not guarantee visibility through the socket I/O.
+	<-done
+	if decodeErr != nil {
+		t.Fatalf("decode request: %v", decodeErr)
 	}
 	if gotReq.Path != "/usr/bin/python3" {
 		t.Fatalf("req.Path = %q, want /usr/bin/python3", gotReq.Path)
