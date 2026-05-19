@@ -13,13 +13,13 @@ func TestRecordingRoundtrip(t *testing.T) {
 
 	// Write session header.
 	if err := rec.WriteSessionHeader(&SessionHeader{
-		Version:   "0.1.0",
-		StartTime: 1000,
-		LocalUser: "testuser",
-		LocalPID:  42,
-		SSHAddr:   "remote:22",
-		SSHUser:   "root",
-		AgentPath: "/tmp/mproxy-agent",
+		Version:     "0.1.0",
+		StartTime:   1000,
+		LocalUser:   "testuser",
+		LocalPID:    42,
+		BackendType: "ssh",
+		BackendAddr: "remote:22",
+		AgentPath:   "/tmp/mproxy-agent",
 	}); err != nil {
 		t.Fatalf("WriteSessionHeader: %v", err)
 	}
@@ -87,6 +87,12 @@ func TestRecordingRoundtrip(t *testing.T) {
 	}
 	if records[0].Header.LocalUser != "testuser" {
 		t.Errorf("record[0] header local_user = %q", records[0].Header.LocalUser)
+	}
+	if records[0].Header.BackendType != "ssh" {
+		t.Errorf("record[0] header backend_type = %q", records[0].Header.BackendType)
+	}
+	if records[0].Header.BackendAddr != "remote:22" {
+		t.Errorf("record[0] header backend_addr = %q", records[0].Header.BackendAddr)
 	}
 
 	// Verify command 1 start.

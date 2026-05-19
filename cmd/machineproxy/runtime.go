@@ -449,8 +449,6 @@ func (d *runtimeDeps) StartBroker(ctx context.Context) error {
 			LocalPID:    os.Getpid(),
 			BackendType: string(d.backend.Type()),
 			BackendAddr: d.backend.Addr(),
-			SSHAddr:     sshAddrIfSSH(d.backend),
-			SSHUser:     d.backend.User(),
 			AgentPath:   d.cfg.Components.AgentRemotePath,
 		}); err != nil {
 			d.log.Warn("failed to write session header", "error", err)
@@ -662,14 +660,4 @@ func compileIDMap(entries []string, lookup config.IDLookup, field string) ([]wor
 		})
 	}
 	return out, nil
-}
-
-// sshAddrIfSSH returns the backend's address only when the backend is
-// SSH. The recording header keeps SSHAddr populated for older parsers
-// that only understand SSH-style sessions.
-func sshAddrIfSSH(b remote.Backend) string {
-	if b.Type() == remote.TypeSSH {
-		return b.Addr()
-	}
-	return ""
 }
