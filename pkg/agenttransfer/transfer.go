@@ -1,7 +1,3 @@
-// Package agenttransfer is a thin caching layer over
-// remote.Backend.UploadAgent. The backend does the actual upload; this
-// package just memoises the resolved remote path so multiple callers
-// (path-stub enumeration, broker startup) don't repeat the work.
 package agenttransfer
 
 import (

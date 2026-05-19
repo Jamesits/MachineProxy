@@ -1,6 +1,3 @@
-// Package remote defines the backend-agnostic abstraction over the
-// remote target that machineproxy talks to. Today this is implemented by
-// pkg/remote/ssh (SSH+SFTP) and pkg/remote/docker (Docker exec+archive).
 package remote
 
 import (
@@ -83,9 +80,9 @@ type Backend interface {
 	Close() error
 }
 
-// Session is a single command execution channel. The shape mirrors
-// golang.org/x/crypto/ssh.Session for back-compat with code that grew
-// up around it.
+// Session is a single command execution channel. The shape follows the
+// subset of golang.org/x/crypto/ssh.Session that command runners need,
+// while remaining implementable by non-SSH backends.
 type Session interface {
 	StdinPipe() (io.WriteCloser, error)
 	StdoutPipe() (io.Reader, error)

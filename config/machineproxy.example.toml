@@ -136,10 +136,11 @@ env_remove = [
 # [agent]
 
 # Agent env filtering controls which variables are forwarded to the remote.
-# Env vars added or changed by the parent process (after the hook is loaded)
-# are always forwarded. For inherited (unchanged) vars, only those matching
-# env_keep patterns are sent; any matching env_remove are always stripped.
-# env_remove takes priority over env_keep.
+# Env vars added or changed after exec interception starts are always
+# forwarded when the interception layer marks them in MPROXY_CHANGED_ENVS.
+# For inherited (unchanged) vars, only those matching env_keep patterns are
+# sent; any matching env_remove are always stripped. env_remove takes
+# priority over env_keep.
 # Patterns are globs (filepath.Match syntax) or /regex/ delimited.
 # env_keep = [
 #     "HOME",

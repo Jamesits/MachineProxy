@@ -1,7 +1,5 @@
 //go:build backend_ssh
 
-// Package ssh adapts pkg/sshconn into a remote.Backend so the rest of
-// the codebase can consume the backend-agnostic interface.
 package ssh
 
 import (

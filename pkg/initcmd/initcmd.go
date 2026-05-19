@@ -1,16 +1,3 @@
-// Package initcmd resolves the entrypoint command passed to machineproxy
-// and derives the local_commands entries that should accompany it.
-//
-// Two concerns live together here because they share inputs:
-//
-//  1. LookPath performs a PATH-style lookup that can skip arbitrary
-//     directories. It is used to resolve the entrypoint without
-//     consulting the FUSE-backed path-stub directory, which serves
-//     remote ELFs that the local kernel cannot load.
-//  2. DeriveLocalCommands inspects the resolved entrypoint for a
-//     #!-shebang and returns the chain of paths (and, for env-style
-//     interpreters, the env target name) that should be added to
-//     local_commands so the tracer allows them to run locally.
 package initcmd
 
 import (
@@ -108,7 +95,7 @@ func checkExec(path string) error {
 // the interpreter is appended as an absolute-path rule. When the
 // interpreter is env-like (basename "env"), the first non-flag token in
 // the shebang argument is appended as a basename rule so the actual
-// language runtime is also whitelisted.
+// language runtime is also kept on the local side.
 //
 // Errors reading the file are non-fatal; the function returns the entries
 // it could derive plus the error so the caller can log it. log must be

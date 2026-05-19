@@ -665,8 +665,8 @@ func compileIDMap(entries []string, lookup config.IDLookup, field string) ([]wor
 }
 
 // sshAddrIfSSH returns the backend's address only when the backend is
-// SSH. The recording header keeps SSHAddr populated for SSH-style
-// sessions for back-compat with existing parsers.
+// SSH. The recording header keeps SSHAddr populated for older parsers
+// that only understand SSH-style sessions.
 func sshAddrIfSSH(b remote.Backend) string {
 	if b.Type() == remote.TypeSSH {
 		return b.Addr()

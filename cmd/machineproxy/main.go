@@ -227,7 +227,7 @@ func (r *repeatedString) Set(v string) error {
 //
 //	machineproxy [flags] [-p port] [-l user] DEST [-- cmd...]
 //
-// DEST is either a bare host (back-compat: defaults to ssh), or a
+// DEST is either a bare host (which defaults to ssh), or a
 // scheme-prefixed destination such as ssh://user@host:port or
 // docker://container.
 func parseCLIArgs(args []string) (*cliArgs, error) {

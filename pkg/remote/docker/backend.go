@@ -1,9 +1,5 @@
 //go:build backend_docker
 
-// Package docker implements a remote.Backend that attaches to a
-// running container via the Docker SDK. Connection settings honor the
-// standard docker client env vars (DOCKER_HOST, DOCKER_API_VERSION,
-// DOCKER_TLS_VERIFY, DOCKER_CERT_PATH) via client.FromEnv.
 package docker
 
 import (

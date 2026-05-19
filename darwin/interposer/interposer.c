@@ -16,7 +16,7 @@
 //   - "name"        — basename match against the last path segment
 // Regex entries ("/pattern/" with delimiters) are *not* honored by the
 // dylib; they always fall through to remote exec. This is a deliberate
-// scope reduction documented in the README.
+// scope reduction in the C implementation.
 //
 // Built per-arch (arm64 + amd64) by darwin/interposer/build.sh.
 

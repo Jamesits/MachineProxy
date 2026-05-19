@@ -42,9 +42,9 @@ type Record struct {
 
 // SessionHeader is written once at the start of a recording file.
 //
-// SSHAddr/SSHUser are kept for back-compat with pre-multi-backend
-// recordings; new code should also populate BackendType/BackendAddr so
-// non-SSH backends can be identified.
+// SSHAddr/SSHUser remain in the wire format for older recording readers;
+// new code should also populate BackendType/BackendAddr so non-SSH
+// backends can be identified.
 type SessionHeader struct {
 	Version     string `cbor:"version"`
 	StartTime   int64  `cbor:"start_time"` // unix nanos

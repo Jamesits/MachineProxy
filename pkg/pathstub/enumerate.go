@@ -1,8 +1,3 @@
-// Package pathstub builds and serves a read-only FUSE directory that
-// exposes one stub per executable reachable through the remote machine's
-// $PATH. Reads on a stub proxy to the corresponding remote binary via
-// SFTP; exec()-ing a stub gets rewritten by the broker's PathMapper to
-// invoke the real remote path through mproxy-agent.
 package pathstub
 
 import (
@@ -81,9 +76,10 @@ func splitPath(p string) []string {
 
 // FilterLocalCommands removes entries whose synthesised stub path
 // (mountPath/<name>) would be matched by any rule in localCommands.
-// This prevents the tracer from shadowing a binary the user explicitly
-// opted to run locally with a remote-routing stub. mountPath is the
-// configured container-side directory where the stub FUSE is bind-mounted.
+// This prevents the path-stub mount from shadowing a binary the user
+// explicitly opted to run locally with a remote-routing stub. mountPath
+// is the configured container-side directory where the stub FUSE is
+// bind-mounted.
 //
 // Rule-by-rule behaviour (mirrors config.LocalCommandRule.Match):
 //   - basename rule (e.g. "env")          → filters out the matching stub.

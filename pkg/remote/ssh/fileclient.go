@@ -15,10 +15,8 @@ import (
 	"github.com/jamesits/machineproxy/pkg/remote"
 )
 
-// sftpFileClient wraps *sftp.Client so it satisfies remote.FileClient.
-// The method bodies match what workspacefs.SFTPAdapter,
-// pathstub.RemoteOpener and agenttransfer's internal client wanted
-// before this refactor.
+// sftpFileClient wraps *sftp.Client so it satisfies remote.FileClient
+// for workspacefs, pathstub, and agenttransfer callers.
 type sftpFileClient struct{ c *sftp.Client }
 
 func (a *sftpFileClient) Open(p string) (remote.RemoteFile, error) {

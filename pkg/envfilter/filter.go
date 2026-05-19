@@ -1,12 +1,3 @@
-// Package envfilter implements environment variable filtering for remote exec.
-//
-// The C hook library sets MPROXY_CHANGED_ENVS with the names of variables
-// that were added or modified after the hook was loaded. These are always
-// forwarded. Other variables are filtered through configurable keep/remove
-// patterns (similar to sudo's env_keep).
-//
-// Patterns are either globs (filepath.Match syntax) or regexes delimited
-// by slashes (e.g. /^AWS_/).
 package envfilter
 
 import (
@@ -81,7 +72,7 @@ func matchesAnyCompiled(name string, matchers []matcher) bool {
 // Rules (applied in order):
 //  1. MPROXY_CHANGED_ENVS is always stripped from the output.
 //  2. If a var name matches any remove pattern → drop.
-//  3. If a var name is in the changed set (from MPROXY_CHANGED_ENVS) → keep.
+//  3. If a var name is in the exec-interception changed set → keep.
 //  4. If a var name matches any keep pattern → keep.
 //  5. Otherwise → drop.
 func Filter(env []string, keep []string, remove []string) []string {

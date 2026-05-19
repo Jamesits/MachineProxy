@@ -76,6 +76,6 @@ func buildBwrapArgs(workingDir string, cmdline []string, binds []Bind) []string 
 	return args
 }
 
-// Leave is a no-op retained for interface compatibility.
-// Bwrap cleans up its own namespaces on exit.
+// Leave releases namespace resources after Run. Bwrap cleans up its own
+// namespaces on exit, so Linux has no additional work here.
 func (n *Namespace) Leave() {}

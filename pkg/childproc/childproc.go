@@ -1,7 +1,3 @@
-// Package childproc launches and manages a single child process with
-// portable plumbing for stdin/stdout/stderr and platform-specific
-// behavior for process-group control, signal delivery, and extra file
-// descriptors.
 package childproc
 
 import (

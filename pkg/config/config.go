@@ -243,12 +243,12 @@ type Config struct {
 		// any env-target are auto-appended to LocalCommands. The
 		// initial exec is always resolved against the local PATH
 		// (the path-stub directory is skipped) because the path-stub
-		// serves remote ELF binaries that cannot be loaded by the
-		// local kernel; whitelisting the resolved chain prevents the
-		// tracer from later routing those same paths to the remote
-		// when they are re-execed (for instance by the kernel's
-		// binfmt_script interpreter). Defaults to true; set false to
-		// opt out.
+		// serves remote binaries that the local kernel may not load;
+		// whitelisting the resolved chain prevents the exec
+		// interception layer from later routing those same paths to
+		// the remote when they are re-execed (for instance by the
+		// kernel's binfmt_script interpreter). Defaults to true; set
+		// false to opt out.
 		ForceResolveInitialCommandLocally *bool `yaml:"force_resolve_initial_command_locally" toml:"force_resolve_initial_command_locally" json:"force_resolve_initial_command_locally"`
 		// UIDMode controls how the workspace FUSE mount reports file
 		// owner UIDs and how chown(uid, _) calls are forwarded:
