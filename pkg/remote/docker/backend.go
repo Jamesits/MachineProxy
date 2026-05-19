@@ -58,7 +58,7 @@ func New(ctx context.Context, cfg Config) (*Backend, error) {
 	if err != nil {
 		return nil, fmt.Errorf("docker context resolution: %w", err)
 	}
-	cli, err := client.NewClientWithOpts(opts...)
+	cli, err := client.New(opts...)
 	if err != nil {
 		return nil, fmt.Errorf("docker client: %w", err)
 	}

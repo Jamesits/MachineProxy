@@ -1,5 +1,10 @@
 version: "2"
 
+run:
+  build-tags:
+    - backend_ssh
+    - backend_docker
+
 linters:
   exclusions:
     rules:

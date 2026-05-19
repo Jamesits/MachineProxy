@@ -20,7 +20,7 @@ type backendFactory func(context.Context, *config.Config, *slog.Logger) (remote.
 // backends omitted from -tags leave no entry behind.
 var backendFactories = map[string]backendFactory{}
 
-func registerBackend(name string, f backendFactory) {
+func registerBackend(name string, f backendFactory) { //nolint:unused // called from init() in build-tag-gated files
 	backendFactories[name] = f
 }
 

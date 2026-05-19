@@ -118,7 +118,7 @@ func NewFromCompose(ctx context.Context, cfg Config, project, service string, se
 	if err != nil {
 		return nil, fmt.Errorf("compose context resolution: %w", err)
 	}
-	cli, err := client.NewClientWithOpts(opts...)
+	cli, err := client.New(opts...)
 	if err != nil {
 		return nil, fmt.Errorf("compose docker client: %w", err)
 	}

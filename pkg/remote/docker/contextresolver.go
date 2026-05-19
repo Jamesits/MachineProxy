@@ -38,7 +38,7 @@ const (
 // TLS contexts are fully supported. SSH-scheme contexts are passed through
 // as-is (docker/docker/client handles ssh:// natively via its dialer).
 func resolveClientOpts(cfgHost string) ([]client.Opt, error) {
-	base := []client.Opt{client.FromEnv, client.WithAPIVersionNegotiation()}
+	base := []client.Opt{client.FromEnv}
 
 	// Explicit host in machineproxy config overrides everything.
 	if cfgHost != "" {
