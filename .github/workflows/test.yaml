@@ -18,7 +18,7 @@ jobs:
       fail-fast: false
       matrix:
         template:
-          - centos7
+          - centos-7
           - debian-13
     steps:
       - name: Harden Runner

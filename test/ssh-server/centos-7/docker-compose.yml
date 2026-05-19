@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: localhost/machineproxy/test-ssh-server-centos7:latest
+    image: localhost/machineproxy/test-ssh-server-centos-7:latest
     environment:
       AUTHORIZED_KEY: "${AUTHORIZED_KEY}"
     ports:

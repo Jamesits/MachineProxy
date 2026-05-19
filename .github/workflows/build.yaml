@@ -67,7 +67,7 @@ jobs:
         # One entry per directory under test/ssh-server/. Each provides a
         # docker-compose definition for an SSH server we exercise end-to-end.
         template:
-          - centos7
+          - centos-7
           - debian-13
     steps:
       - name: Harden Runner
@@ -167,7 +167,7 @@ jobs:
           out=$("$MPROXY" --config /tmp/e2e.yaml -- bash -c 'cat /etc/os-release')
           printf '%s\n' "$out"
           case "${{ matrix.template }}" in
-            centos7)   echo "$out" | grep -Eqi 'centos|^ID=.*centos' ;;
+            centos-7)  echo "$out" | grep -Eqi 'centos|^ID=.*centos' ;;
             debian-13) echo "$out" | grep -Eqi 'debian|^ID=.*debian' ;;
             *) echo "unknown template"; exit 1 ;;
           esac
