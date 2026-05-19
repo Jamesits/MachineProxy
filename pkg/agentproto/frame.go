@@ -89,36 +89,50 @@ type PathInfo struct {
 type FileOp uint8
 
 const (
-	FileOpOpen     FileOp = 1  // input: Path, Flags  → output: Handle
-	FileOpCreate   FileOp = 2  // input: Path         → output: Handle (O_WRONLY|O_CREATE|O_TRUNC)
-	FileOpOpenFile FileOp = 3  // input: Path, Flags  → output: Handle
-	FileOpClose    FileOp = 4  // input: Handle
-	FileOpReadAt   FileOp = 5  // input: Handle, Offset, Size  → output: Data, EOF
-	FileOpWriteAt  FileOp = 6  // input: Handle, Offset, Data  → output: Size (bytes written)
-	FileOpStat     FileOp = 7  // input: Path → output: Stat
-	FileOpReadDir  FileOp = 8  // input: Path → output: Entries
-	FileOpMkdir    FileOp = 9  // input: Path
-	FileOpMkdirAll FileOp = 10 // input: Path
-	FileOpRemove   FileOp = 11 // input: Path
-	FileOpRename   FileOp = 12 // input: Path, NewPath
-	FileOpChmod    FileOp = 13 // input: Path, Mode
-	FileOpTruncate FileOp = 14 // input: Path, Size
-	FileOpGetwd    FileOp = 15 //             → output: Path
+	FileOpOpen      FileOp = 1  // input: Path, Flags  → output: Handle
+	FileOpCreate    FileOp = 2  // input: Path         → output: Handle (O_WRONLY|O_CREATE|O_TRUNC)
+	FileOpOpenFile  FileOp = 3  // input: Path, Flags  → output: Handle
+	FileOpClose     FileOp = 4  // input: Handle
+	FileOpReadAt    FileOp = 5  // input: Handle, Offset, Size  → output: Data, EOF
+	FileOpWriteAt   FileOp = 6  // input: Handle, Offset, Data  → output: Size (bytes written)
+	FileOpStat      FileOp = 7  // input: Path → output: Stat
+	FileOpLstat     FileOp = 8  // input: Path → output: Stat, does not follow symlinks
+	FileOpReadDir   FileOp = 9  // input: Path → output: Entries
+	FileOpMkdir     FileOp = 10 // input: Path
+	FileOpMkdirAll  FileOp = 11 // input: Path
+	FileOpRemove    FileOp = 12 // input: Path
+	FileOpRename    FileOp = 13 // input: Path, NewPath
+	FileOpChmod     FileOp = 14 // input: Path, Mode
+	FileOpTruncate  FileOp = 15 // input: Path, Size
+	FileOpGetwd     FileOp = 16 //             → output: Path
+	FileOpFsync     FileOp = 17 // input: Handle
+	FileOpReadlink  FileOp = 18 // input: Path → output: Path
+	FileOpSymlink   FileOp = 19 // input: Path target, NewPath linkpath
+	FileOpLink      FileOp = 20 // input: Path old, NewPath new
+	FileOpChown     FileOp = 21 // input: Path, UID, GID
+	FileOpChtimes   FileOp = 22 // input: Path, AtimeNanos, MTimeNanos
+	FileOpStatfs    FileOp = 23 // input: Path → output: Statfs
+	FileOpFstat     FileOp = 24 // input: Handle → output: Stat
+	FileOpFtruncate FileOp = 25 // input: Handle, Size
 )
 
 // FileOpReq is the request half of a file-op RPC. Only fields relevant
 // to the chosen Op should be set.
 type FileOpReq struct {
-	ReqID   uint32 `cbor:"id"`
-	Op      FileOp `cbor:"op"`
-	Path    string `cbor:"p,omitempty"`
-	NewPath string `cbor:"np,omitempty"`
-	Flags   int32  `cbor:"fl,omitempty"`
-	Mode    uint32 `cbor:"mo,omitempty"`
-	Handle  uint32 `cbor:"h,omitempty"`
-	Offset  int64  `cbor:"of,omitempty"`
-	Size    int64  `cbor:"sz,omitempty"`
-	Data    []byte `cbor:"d,omitempty"`
+	ReqID      uint32 `cbor:"id"`
+	Op         FileOp `cbor:"op"`
+	Path       string `cbor:"p,omitempty"`
+	NewPath    string `cbor:"np,omitempty"`
+	Flags      int32  `cbor:"fl,omitempty"`
+	Mode       uint32 `cbor:"mo,omitempty"`
+	UID        uint32 `cbor:"uid,omitempty"`
+	GID        uint32 `cbor:"gid,omitempty"`
+	Handle     uint32 `cbor:"h,omitempty"`
+	Offset     int64  `cbor:"of,omitempty"`
+	Size       int64  `cbor:"sz,omitempty"`
+	AtimeNanos int64  `cbor:"at,omitempty"`
+	MTimeNanos int64  `cbor:"mt,omitempty"`
+	Data       []byte `cbor:"d,omitempty"`
 }
 
 // FileOpResp is the response half. Errno (when nonzero) is a POSIX
@@ -134,6 +148,7 @@ type FileOpResp struct {
 	EOF     bool           `cbor:"eof,omitempty"` // for ReadAt
 	Path    string         `cbor:"p,omitempty"`   // for Getwd
 	Stat    *FileStat      `cbor:"st,omitempty"`
+	Statfs  *FileStatfs    `cbor:"sf,omitempty"`
 	Entries []FileDirEntry `cbor:"en,omitempty"`
 }
 
@@ -143,7 +158,28 @@ type FileStat struct {
 	Size       int64  `cbor:"s"`
 	Mode       uint32 `cbor:"m"`
 	MTimeNanos int64  `cbor:"t,omitempty"`
+	ATimeNanos int64  `cbor:"at,omitempty"`
+	CTimeNanos int64  `cbor:"ct,omitempty"`
+	UID        uint32 `cbor:"uid,omitempty"`
+	GID        uint32 `cbor:"gid,omitempty"`
+	Nlink      uint32 `cbor:"nl,omitempty"`
+	Rdev       uint32 `cbor:"rd,omitempty"`
+	Blocks     uint64 `cbor:"bl,omitempty"`
+	Blksize    uint32 `cbor:"bs,omitempty"`
+	Ino        uint64 `cbor:"ino,omitempty"`
 	IsDir      bool   `cbor:"d,omitempty"`
+}
+
+// FileStatfs is a backend-agnostic statfs/statvfs snapshot.
+type FileStatfs struct {
+	Blocks  uint64 `cbor:"b,omitempty"`
+	Bfree   uint64 `cbor:"bf,omitempty"`
+	Bavail  uint64 `cbor:"ba,omitempty"`
+	Files   uint64 `cbor:"f,omitempty"`
+	Ffree   uint64 `cbor:"ff,omitempty"`
+	Bsize   uint32 `cbor:"bs,omitempty"`
+	Frsize  uint32 `cbor:"fr,omitempty"`
+	NameLen uint32 `cbor:"nl,omitempty"`
 }
 
 // FileDirEntry is one entry in a FileOpReadDir response.

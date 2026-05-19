@@ -7,6 +7,7 @@ import (
 	"os"
 	"sync"
 	"syscall"
+	"time"
 )
 
 // FileOpServer is the agent-side implementation of file ops. It is
@@ -42,7 +43,7 @@ func (s *FileOpServer) Handle(req *FileOpReq) *FileOpResp {
 		}
 		resp.Handle = s.put(f)
 	case FileOpOpenFile:
-		f, err := os.OpenFile(req.Path, int(req.Flags), 0o644)
+		f, err := os.OpenFile(req.Path, int(req.Flags), fileModeFromPOSIX(req.Mode))
 		if err != nil {
 			return errResp(err)
 		}
@@ -50,15 +51,41 @@ func (s *FileOpServer) Handle(req *FileOpReq) *FileOpResp {
 	case FileOpClose:
 		f, ok := s.take(req.Handle)
 		if !ok {
-			return errResp(os.ErrInvalid)
+			return errResp(syscall.EBADF)
 		}
 		if err := f.Close(); err != nil {
+			return errResp(err)
+		}
+	case FileOpFsync:
+		f, ok := s.get(req.Handle)
+		if !ok {
+			return errResp(syscall.EBADF)
+		}
+		if err := f.Sync(); err != nil {
+			return errResp(err)
+		}
+	case FileOpFstat:
+		f, ok := s.get(req.Handle)
+		if !ok {
+			return errResp(syscall.EBADF)
+		}
+		st, err := f.Stat()
+		if err != nil {
+			return errResp(err)
+		}
+		resp.Stat = statFromInfo(st)
+	case FileOpFtruncate:
+		f, ok := s.get(req.Handle)
+		if !ok {
+			return errResp(syscall.EBADF)
+		}
+		if err := f.Truncate(req.Size); err != nil {
 			return errResp(err)
 		}
 	case FileOpReadAt:
 		f, ok := s.get(req.Handle)
 		if !ok {
-			return errResp(os.ErrInvalid)
+			return errResp(syscall.EBADF)
 		}
 		size := req.Size
 		if size <= 0 {
@@ -75,15 +102,29 @@ func (s *FileOpServer) Handle(req *FileOpReq) *FileOpResp {
 	case FileOpWriteAt:
 		f, ok := s.get(req.Handle)
 		if !ok {
-			return errResp(os.ErrInvalid)
+			return errResp(syscall.EBADF)
 		}
-		n, err := f.WriteAt(req.Data, req.Offset)
+		var n int
+		var err error
+		if req.Offset < 0 {
+			n, err = f.Write(req.Data)
+		} else {
+			n, err = f.WriteAt(req.Data, req.Offset)
+		}
 		resp.N = int64(n)
 		if err != nil {
-			return errResp(err)
+			errOut := errResp(err)
+			errOut.N = resp.N
+			return errOut
 		}
 	case FileOpStat:
 		st, err := os.Stat(req.Path)
+		if err != nil {
+			return errResp(err)
+		}
+		resp.Stat = statFromInfo(st)
+	case FileOpLstat:
+		st, err := os.Lstat(req.Path)
 		if err != nil {
 			return errResp(err)
 		}
@@ -97,17 +138,17 @@ func (s *FileOpServer) Handle(req *FileOpReq) *FileOpResp {
 		for _, e := range entries {
 			info, ierr := e.Info()
 			if ierr != nil {
-				continue
+				return errResp(ierr)
 			}
 			out = append(out, FileDirEntry{Stat: *statFromInfo(info)})
 		}
 		resp.Entries = out
 	case FileOpMkdir:
-		if err := os.Mkdir(req.Path, os.FileMode(req.Mode)); err != nil {
+		if err := os.Mkdir(req.Path, fileModeFromPOSIX(req.Mode)); err != nil {
 			return errResp(err)
 		}
 	case FileOpMkdirAll:
-		if err := os.MkdirAll(req.Path, os.FileMode(req.Mode)); err != nil {
+		if err := os.MkdirAll(req.Path, fileModeFromPOSIX(req.Mode)); err != nil {
 			return errResp(err)
 		}
 	case FileOpRemove:
@@ -118,14 +159,38 @@ func (s *FileOpServer) Handle(req *FileOpReq) *FileOpResp {
 		if err := os.Rename(req.Path, req.NewPath); err != nil {
 			return errResp(err)
 		}
+	case FileOpReadlink:
+		target, err := os.Readlink(req.Path)
+		if err != nil {
+			return errResp(err)
+		}
+		resp.Path = target
+	case FileOpSymlink:
+		if err := os.Symlink(req.Path, req.NewPath); err != nil {
+			return errResp(err)
+		}
+	case FileOpLink:
+		if err := os.Link(req.Path, req.NewPath); err != nil {
+			return errResp(err)
+		}
 	case FileOpChmod:
-		if err := os.Chmod(req.Path, os.FileMode(req.Mode)); err != nil {
+		if err := os.Chmod(req.Path, fileModeFromPOSIX(req.Mode)); err != nil {
+			return errResp(err)
+		}
+	case FileOpChown:
+		if err := os.Chown(req.Path, int(req.UID), int(req.GID)); err != nil {
+			return errResp(err)
+		}
+	case FileOpChtimes:
+		if err := os.Chtimes(req.Path, time.Unix(0, req.AtimeNanos), time.Unix(0, req.MTimeNanos)); err != nil {
 			return errResp(err)
 		}
 	case FileOpTruncate:
 		if err := os.Truncate(req.Path, req.Size); err != nil {
 			return errResp(err)
 		}
+	case FileOpStatfs:
+		return handleStatfs(req)
 	case FileOpGetwd:
 		wd, err := os.Getwd()
 		if err != nil {
@@ -181,18 +246,31 @@ func (s *FileOpServer) take(h uint32) (*os.File, bool) {
 
 // statFromInfo converts an os.FileInfo into the wire FileStat.
 func statFromInfo(info os.FileInfo) *FileStat {
-	return &FileStat{
+	mode := info.Mode()
+	if mode.Type() == os.ModeIrregular {
+		if sysMode, ok := unixModeFromSys(info.Sys()); ok {
+			mode = modeFromUnix(sysMode) | mode.Perm()
+		}
+	}
+	st := &FileStat{
 		Name:       info.Name(),
 		Size:       info.Size(),
-		Mode:       uint32(info.Mode()),
+		Mode:       uint32(mode),
 		MTimeNanos: info.ModTime().UnixNano(),
 		IsDir:      info.IsDir(),
 	}
+	augmentStatFromSys(st, info.Sys())
+	return st
 }
 
 // errResp produces a FileOpResp whose Errno and ErrMsg describe err.
 func errResp(err error) *FileOpResp {
 	resp := &FileOpResp{ErrMsg: err.Error()}
+	var errno syscall.Errno
+	if errors.As(err, &errno) {
+		resp.Errno = uint32(errno)
+		return resp
+	}
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 		resp.Errno = uint32(syscall.ENOENT)
@@ -203,17 +281,6 @@ func errResp(err error) *FileOpResp {
 	case errors.Is(err, os.ErrInvalid):
 		resp.Errno = uint32(syscall.EINVAL)
 	default:
-		var serr *os.PathError
-		if errors.As(err, &serr) {
-			if e, ok := serr.Err.(syscall.Errno); ok {
-				resp.Errno = uint32(e)
-				return resp
-			}
-		}
-		if e, ok := err.(syscall.Errno); ok {
-			resp.Errno = uint32(e)
-			return resp
-		}
 		resp.Errno = uint32(syscall.EIO)
 	}
 	return resp

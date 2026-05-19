@@ -125,6 +125,9 @@ func errnoToErr(resp *agentproto.FileOpResp) error {
 	case syscall.EINVAL:
 		return os.ErrInvalid
 	}
+	if resp.Errno != 0 {
+		return syscall.Errno(resp.Errno)
+	}
 	if resp.ErrMsg != "" {
 		return errors.New(resp.ErrMsg)
 	}
@@ -150,16 +153,17 @@ func (c *agentFileClient) Create(p string) (remote.RemoteWriteFile, error) {
 }
 
 // OpenFile implements remote.FileClient.
-func (c *agentFileClient) OpenFile(p string, flags int) (remote.RemoteWriteFile, error) {
+func (c *agentFileClient) OpenFile(p string, flags int, mode os.FileMode) (remote.RemoteWriteFile, error) {
 	resp, err := c.do(c.ctx, &agentproto.FileOpReq{
 		Op:    agentproto.FileOpOpenFile,
 		Path:  p,
 		Flags: int32(flags),
+		Mode:  fileModeToPOSIX(mode),
 	})
 	if err != nil {
 		return nil, err
 	}
-	return &remoteWriteFile{c: c, handle: resp.Handle}, nil
+	return &remoteWriteFile{c: c, handle: resp.Handle, flags: flags}, nil
 }
 
 // Stat implements remote.FileClient.
@@ -170,6 +174,18 @@ func (c *agentFileClient) Stat(p string) (os.FileInfo, error) {
 	}
 	if resp.Stat == nil {
 		return nil, errors.New("stat: empty result")
+	}
+	return statInfo{s: *resp.Stat}, nil
+}
+
+// Lstat implements remote.FileClient.
+func (c *agentFileClient) Lstat(p string) (os.FileInfo, error) {
+	resp, err := c.do(c.ctx, &agentproto.FileOpReq{Op: agentproto.FileOpLstat, Path: p})
+	if err != nil {
+		return nil, err
+	}
+	if resp.Stat == nil {
+		return nil, errors.New("lstat: empty result")
 	}
 	return statInfo{s: *resp.Stat}, nil
 }
@@ -187,15 +203,24 @@ func (c *agentFileClient) ReadDir(p string) ([]os.FileInfo, error) {
 	return out, nil
 }
 
+// Readlink implements remote.FileClient.
+func (c *agentFileClient) Readlink(p string) (string, error) {
+	resp, err := c.do(c.ctx, &agentproto.FileOpReq{Op: agentproto.FileOpReadlink, Path: p})
+	if err != nil {
+		return "", err
+	}
+	return resp.Path, nil
+}
+
 // Mkdir implements remote.FileClient.
-func (c *agentFileClient) Mkdir(p string) error {
-	_, err := c.do(c.ctx, &agentproto.FileOpReq{Op: agentproto.FileOpMkdir, Path: p, Mode: 0o755})
+func (c *agentFileClient) Mkdir(p string, mode os.FileMode) error {
+	_, err := c.do(c.ctx, &agentproto.FileOpReq{Op: agentproto.FileOpMkdir, Path: p, Mode: fileModeToPOSIX(mode)})
 	return err
 }
 
 // MkdirAll implements remote.FileClient.
-func (c *agentFileClient) MkdirAll(p string) error {
-	_, err := c.do(c.ctx, &agentproto.FileOpReq{Op: agentproto.FileOpMkdirAll, Path: p, Mode: 0o755})
+func (c *agentFileClient) MkdirAll(p string, mode os.FileMode) error {
+	_, err := c.do(c.ctx, &agentproto.FileOpReq{Op: agentproto.FileOpMkdirAll, Path: p, Mode: fileModeToPOSIX(mode)})
 	return err
 }
 
@@ -213,10 +238,42 @@ func (c *agentFileClient) Rename(oldPath, newPath string) error {
 	return err
 }
 
+// Symlink implements remote.FileClient.
+func (c *agentFileClient) Symlink(target, linkpath string) error {
+	_, err := c.do(c.ctx, &agentproto.FileOpReq{
+		Op: agentproto.FileOpSymlink, Path: target, NewPath: linkpath,
+	})
+	return err
+}
+
+// Link implements remote.FileClient.
+func (c *agentFileClient) Link(oldPath, newPath string) error {
+	_, err := c.do(c.ctx, &agentproto.FileOpReq{
+		Op: agentproto.FileOpLink, Path: oldPath, NewPath: newPath,
+	})
+	return err
+}
+
 // Chmod implements remote.FileClient.
 func (c *agentFileClient) Chmod(p string, mode os.FileMode) error {
 	_, err := c.do(c.ctx, &agentproto.FileOpReq{
-		Op: agentproto.FileOpChmod, Path: p, Mode: uint32(mode),
+		Op: agentproto.FileOpChmod, Path: p, Mode: fileModeToPOSIX(mode),
+	})
+	return err
+}
+
+// Chown implements remote.FileClient.
+func (c *agentFileClient) Chown(p string, uid, gid int) error {
+	_, err := c.do(c.ctx, &agentproto.FileOpReq{
+		Op: agentproto.FileOpChown, Path: p, UID: uint32(uid), GID: uint32(gid),
+	})
+	return err
+}
+
+// Chtimes implements remote.FileClient.
+func (c *agentFileClient) Chtimes(p string, atime, mtime time.Time) error {
+	_, err := c.do(c.ctx, &agentproto.FileOpReq{
+		Op: agentproto.FileOpChtimes, Path: p, AtimeNanos: atime.UnixNano(), MTimeNanos: mtime.UnixNano(),
 	})
 	return err
 }
@@ -227,6 +284,27 @@ func (c *agentFileClient) Truncate(p string, size int64) error {
 		Op: agentproto.FileOpTruncate, Path: p, Size: size,
 	})
 	return err
+}
+
+// Statfs implements remote.FileClient.
+func (c *agentFileClient) Statfs(p string) (*remote.Statfs, error) {
+	resp, err := c.do(c.ctx, &agentproto.FileOpReq{Op: agentproto.FileOpStatfs, Path: p})
+	if err != nil {
+		return nil, err
+	}
+	if resp.Statfs == nil {
+		return nil, errors.New("statfs: empty result")
+	}
+	return &remote.Statfs{
+		Blocks:  resp.Statfs.Blocks,
+		Bfree:   resp.Statfs.Bfree,
+		Bavail:  resp.Statfs.Bavail,
+		Files:   resp.Statfs.Files,
+		Ffree:   resp.Statfs.Ffree,
+		Bsize:   resp.Statfs.Bsize,
+		Frsize:  resp.Statfs.Frsize,
+		NameLen: resp.Statfs.NameLen,
+	}, nil
 }
 
 // Getwd implements remote.FileClient.
@@ -248,12 +326,10 @@ type remoteFile struct {
 
 func (f *remoteFile) Read(p []byte) (int, error) {
 	f.mu.Lock()
+	defer f.mu.Unlock()
 	off := f.pos
-	f.mu.Unlock()
 	n, err := f.ReadAt(p, off)
-	f.mu.Lock()
 	f.pos += int64(n)
-	f.mu.Unlock()
 	return n, err
 }
 
@@ -283,22 +359,64 @@ func (f *remoteFile) Close() error {
 type remoteWriteFile struct {
 	c      *agentFileClient
 	handle uint32
+	flags  int
 	mu     sync.Mutex
 	pos    int64
 }
 
 func (f *remoteWriteFile) Write(p []byte) (int, error) {
+	if f.flags&os.O_APPEND != 0 {
+		return f.writeAt(p, -1)
+	}
 	f.mu.Lock()
+	defer f.mu.Unlock()
 	off := f.pos
-	f.mu.Unlock()
-	n, err := f.WriteAt(p, off)
-	f.mu.Lock()
+	n, err := f.writeAt(p, off)
 	f.pos += int64(n)
-	f.mu.Unlock()
 	return n, err
 }
 
+func (f *remoteWriteFile) ReadAt(p []byte, off int64) (int, error) {
+	resp, err := f.c.do(f.c.ctx, &agentproto.FileOpReq{
+		Op:     agentproto.FileOpReadAt,
+		Handle: f.handle,
+		Offset: off,
+		Size:   int64(len(p)),
+	})
+	if err != nil {
+		return int(respN(resp)), err
+	}
+	n := copy(p, resp.Data)
+	if resp.EOF {
+		return n, io.EOF
+	}
+	return n, nil
+}
+
 func (f *remoteWriteFile) WriteAt(p []byte, off int64) (int, error) {
+	if f.flags&os.O_APPEND != 0 {
+		return f.writeAt(p, -1)
+	}
+	return f.writeAt(p, off)
+}
+
+func (f *remoteWriteFile) Stat() (os.FileInfo, error) {
+	resp, err := f.c.do(f.c.ctx, &agentproto.FileOpReq{Op: agentproto.FileOpFstat, Handle: f.handle})
+	if err != nil {
+		return nil, err
+	}
+	if resp.Stat == nil {
+		return nil, errors.New("fstat: empty result")
+	}
+	return statInfo{s: *resp.Stat}, nil
+}
+
+func (f *remoteWriteFile) Truncate(size int64) error {
+	_, err := f.c.do(f.c.ctx, &agentproto.FileOpReq{Op: agentproto.FileOpFtruncate, Handle: f.handle, Size: size})
+	return err
+}
+
+func (f *remoteWriteFile) writeAt(p []byte, off int64) (int, error) {
 	resp, err := f.c.do(f.c.ctx, &agentproto.FileOpReq{
 		Op:     agentproto.FileOpWriteAt,
 		Handle: f.handle,
@@ -306,9 +424,35 @@ func (f *remoteWriteFile) WriteAt(p []byte, off int64) (int, error) {
 		Data:   p,
 	})
 	if err != nil {
-		return 0, err
+		return int(respN(resp)), err
 	}
 	return int(resp.N), nil
+}
+
+func respN(resp *agentproto.FileOpResp) int64 {
+	if resp == nil {
+		return 0
+	}
+	return resp.N
+}
+
+func fileModeToPOSIX(mode os.FileMode) uint32 {
+	out := uint32(mode.Perm())
+	if mode&os.ModeSetuid != 0 {
+		out |= 0o4000
+	}
+	if mode&os.ModeSetgid != 0 {
+		out |= 0o2000
+	}
+	if mode&os.ModeSticky != 0 {
+		out |= 0o1000
+	}
+	return out
+}
+
+func (f *remoteWriteFile) Sync() error {
+	_, err := f.c.do(f.c.ctx, &agentproto.FileOpReq{Op: agentproto.FileOpFsync, Handle: f.handle})
+	return err
 }
 
 func (f *remoteWriteFile) Close() error {
@@ -324,4 +468,4 @@ func (i statInfo) Size() int64        { return i.s.Size }
 func (i statInfo) Mode() os.FileMode  { return os.FileMode(i.s.Mode) }
 func (i statInfo) ModTime() time.Time { return time.Unix(0, i.s.MTimeNanos) }
 func (i statInfo) IsDir() bool        { return i.s.IsDir }
-func (i statInfo) Sys() any           { return nil }
+func (i statInfo) Sys() any           { return i.s }

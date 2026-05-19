@@ -105,7 +105,11 @@ func (f *FileSystem) ReadFile(ctx context.Context, name string, off int64, size 
 		f.log.Warn("pathstub open failed", "name", name, "remote", e.RemotePath, "error", err)
 		return nil, toErrno(err)
 	}
-	defer fh.Close()
+	defer func() {
+		if cerr := fh.Close(); cerr != nil {
+			f.log.Warn("pathstub close failed", "name", name, "remote", e.RemotePath, "error", cerr)
+		}
+	}()
 
 	buf := make([]byte, size)
 	n, err := fh.ReadAt(buf, off)

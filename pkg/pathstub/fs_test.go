@@ -106,6 +106,24 @@ func TestFileSystemReadOpenerErrorMapsToErrno(t *testing.T) {
 	}
 }
 
+func TestFsyncReadOnlyFileSucceedsAsNoop(t *testing.T) {
+	fsys := New(nil, []agentproto.PathInfoEntry{{Name: "tool", RemotePath: "/bin/tool", Mode: 0o555}}, nil)
+	node := &fileNode{backend: fsys, name: "tool"}
+
+	if errno := node.Fsync(context.Background(), nil, 0); errno != 0 {
+		t.Fatalf("Fsync(file) errno = %v, want 0", errno)
+	}
+}
+
+func TestFsyncReadOnlyDirSucceedsAsNoop(t *testing.T) {
+	fsys := New(nil, nil, nil)
+	node := &dirNode{backend: fsys}
+
+	if errno := node.Fsync(context.Background(), nil, 0); errno != 0 {
+		t.Fatalf("Fsync(dir) errno = %v, want 0", errno)
+	}
+}
+
 func TestFileSystemDedupsByName(t *testing.T) {
 	fs := New(nil, []agentproto.PathInfoEntry{
 		{Name: "a", RemotePath: "/usr/local/bin/a"},

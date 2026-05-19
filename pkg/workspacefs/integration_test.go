@@ -10,6 +10,7 @@ import (
 	"os"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -75,18 +76,44 @@ func (a sftpClientAdapter) Open(p string) (remote.RemoteFile, error) { return a.
 func (a sftpClientAdapter) Create(p string) (remote.RemoteWriteFile, error) {
 	return a.c.Create(p)
 }
-func (a sftpClientAdapter) OpenFile(p string, flags int) (remote.RemoteWriteFile, error) {
+func (a sftpClientAdapter) OpenFile(p string, flags int, mode os.FileMode) (remote.RemoteWriteFile, error) {
 	return a.c.OpenFile(p, flags)
 }
-func (a sftpClientAdapter) Stat(p string) (os.FileInfo, error)      { return a.c.Stat(p) }
-func (a sftpClientAdapter) ReadDir(p string) ([]os.FileInfo, error) { return a.c.ReadDir(p) }
-func (a sftpClientAdapter) Mkdir(p string) error                    { return a.c.Mkdir(p) }
-func (a sftpClientAdapter) MkdirAll(p string) error                 { return a.c.MkdirAll(p) }
-func (a sftpClientAdapter) Remove(p string) error                   { return a.c.Remove(p) }
-func (a sftpClientAdapter) Rename(old, new string) error            { return a.c.Rename(old, new) }
-func (a sftpClientAdapter) Chmod(p string, mode os.FileMode) error  { return a.c.Chmod(p, mode) }
-func (a sftpClientAdapter) Truncate(p string, size int64) error     { return a.c.Truncate(p, size) }
-func (a sftpClientAdapter) Getwd() (string, error)                  { return a.c.Getwd() }
+func (a sftpClientAdapter) Stat(p string) (os.FileInfo, error)        { return a.c.Stat(p) }
+func (a sftpClientAdapter) Lstat(p string) (os.FileInfo, error)       { return a.c.Lstat(p) }
+func (a sftpClientAdapter) ReadDir(p string) ([]os.FileInfo, error)   { return a.c.ReadDir(p) }
+func (a sftpClientAdapter) Readlink(p string) (string, error)         { return a.c.ReadLink(p) }
+func (a sftpClientAdapter) Mkdir(p string, mode os.FileMode) error    { return a.c.Mkdir(p) }
+func (a sftpClientAdapter) MkdirAll(p string, mode os.FileMode) error { return a.c.MkdirAll(p) }
+func (a sftpClientAdapter) Remove(p string) error                     { return a.c.Remove(p) }
+func (a sftpClientAdapter) Rename(old, new string) error              { return a.c.Rename(old, new) }
+func (a sftpClientAdapter) Symlink(target, linkpath string) error {
+	return a.c.Symlink(target, linkpath)
+}
+func (a sftpClientAdapter) Link(old, new string) error             { return a.c.Link(old, new) }
+func (a sftpClientAdapter) Chmod(p string, mode os.FileMode) error { return a.c.Chmod(p, mode) }
+func (a sftpClientAdapter) Chown(p string, uid, gid int) error     { return a.c.Chown(p, uid, gid) }
+func (a sftpClientAdapter) Chtimes(p string, atime, mtime time.Time) error {
+	return a.c.Chtimes(p, atime, mtime)
+}
+func (a sftpClientAdapter) Truncate(p string, size int64) error { return a.c.Truncate(p, size) }
+func (a sftpClientAdapter) Statfs(p string) (*remote.Statfs, error) {
+	st, err := a.c.StatVFS(p)
+	if err != nil {
+		return nil, err
+	}
+	return &remote.Statfs{
+		Blocks:  st.Blocks,
+		Bfree:   st.Bfree,
+		Bavail:  st.Bavail,
+		Files:   st.Files,
+		Ffree:   st.Ffree,
+		Bsize:   uint32(st.Bsize),
+		Frsize:  uint32(st.Frsize),
+		NameLen: uint32(st.Namemax),
+	}, nil
+}
+func (a sftpClientAdapter) Getwd() (string, error) { return a.c.Getwd() }
 
 func cleanupDir(c *sftp.Client, dir string) {
 	entries, _ := c.ReadDir(dir)
@@ -105,7 +132,7 @@ func TestIntegrationCreateAndReadFile(t *testing.T) {
 	fs := testFS(t)
 	ctx := context.Background()
 
-	errno := fs.CreateFile(ctx, "hello.txt")
+	errno := fs.CreateFile(ctx, "hello.txt", uint32(os.O_CREATE|os.O_WRONLY|os.O_TRUNC), 0o644)
 	if errno != 0 {
 		t.Fatalf("CreateFile: errno %v", errno)
 	}
@@ -131,7 +158,7 @@ func TestIntegrationReadFileAtOffset(t *testing.T) {
 	fs := testFS(t)
 	ctx := context.Background()
 
-	if errno := fs.CreateFile(ctx, "offset.txt"); errno != 0 {
+	if errno := fs.CreateFile(ctx, "offset.txt", uint32(os.O_CREATE|os.O_WRONLY|os.O_TRUNC), 0o644); errno != 0 {
 		t.Fatalf("CreateFile: errno %v", errno)
 	}
 	if _, errno := fs.WriteFile(ctx, "offset.txt", []byte("abcdefghij"), 0); errno != 0 {
@@ -151,14 +178,14 @@ func TestIntegrationStat(t *testing.T) {
 	fs := testFS(t)
 	ctx := context.Background()
 
-	if errno := fs.CreateFile(ctx, "statme.txt"); errno != 0 {
+	if errno := fs.CreateFile(ctx, "statme.txt", uint32(os.O_CREATE|os.O_WRONLY|os.O_TRUNC), 0o644); errno != 0 {
 		t.Fatalf("CreateFile: errno %v", errno)
 	}
 	if _, errno := fs.WriteFile(ctx, "statme.txt", []byte("12345"), 0); errno != 0 {
 		t.Fatalf("WriteFile: errno %v", errno)
 	}
 
-	info, errno := fs.Stat("statme.txt")
+	info, errno := fs.Stat(ctx, "statme.txt")
 	if errno != 0 {
 		t.Fatalf("Stat: errno %v", errno)
 	}
@@ -175,8 +202,9 @@ func TestIntegrationStat(t *testing.T) {
 
 func TestIntegrationStatMissing(t *testing.T) {
 	fs := testFS(t)
+	ctx := context.Background()
 
-	_, errno := fs.Stat("nonexistent.txt")
+	_, errno := fs.Stat(ctx, "nonexistent.txt")
 	if errno != syscall.ENOENT {
 		t.Fatalf("expected ENOENT, got %v", errno)
 	}
@@ -186,12 +214,12 @@ func TestIntegrationMkDirAndReadDir(t *testing.T) {
 	fs := testFS(t)
 	ctx := context.Background()
 
-	errno := fs.MkDir(ctx, "subdir")
+	errno := fs.MkDir(ctx, "subdir", 0o755)
 	if errno != 0 {
 		t.Fatalf("MkDir: errno %v", errno)
 	}
 
-	info, errno := fs.Stat("subdir")
+	info, errno := fs.Stat(ctx, "subdir")
 	if errno != 0 {
 		t.Fatalf("Stat subdir: errno %v", errno)
 	}
@@ -199,11 +227,11 @@ func TestIntegrationMkDirAndReadDir(t *testing.T) {
 		t.Fatal("expected directory")
 	}
 
-	if errno := fs.CreateFile(ctx, "subdir/inner.txt"); errno != 0 {
+	if errno := fs.CreateFile(ctx, "subdir/inner.txt", uint32(os.O_CREATE|os.O_WRONLY|os.O_TRUNC), 0o644); errno != 0 {
 		t.Fatalf("CreateFile: errno %v", errno)
 	}
 
-	entries, errno := fs.ReadDir("")
+	entries, errno := fs.ReadDir(ctx, "")
 	if errno != 0 {
 		t.Fatalf("ReadDir: errno %v", errno)
 	}
@@ -224,7 +252,7 @@ func TestIntegrationRename(t *testing.T) {
 	fs := testFS(t)
 	ctx := context.Background()
 
-	if errno := fs.CreateFile(ctx, "old.txt"); errno != 0 {
+	if errno := fs.CreateFile(ctx, "old.txt", uint32(os.O_CREATE|os.O_WRONLY|os.O_TRUNC), 0o644); errno != 0 {
 		t.Fatalf("CreateFile: errno %v", errno)
 	}
 	if _, errno := fs.WriteFile(ctx, "old.txt", []byte("content"), 0); errno != 0 {
@@ -236,7 +264,7 @@ func TestIntegrationRename(t *testing.T) {
 		t.Fatalf("Rename: errno %v", errno)
 	}
 
-	_, errno = fs.Stat("old.txt")
+	_, errno = fs.Stat(ctx, "old.txt")
 	if errno != syscall.ENOENT {
 		t.Fatalf("expected old file ENOENT, got %v", errno)
 	}
@@ -254,7 +282,7 @@ func TestIntegrationUnlink(t *testing.T) {
 	fs := testFS(t)
 	ctx := context.Background()
 
-	if errno := fs.CreateFile(ctx, "delete_me.txt"); errno != 0 {
+	if errno := fs.CreateFile(ctx, "delete_me.txt", uint32(os.O_CREATE|os.O_WRONLY|os.O_TRUNC), 0o644); errno != 0 {
 		t.Fatalf("CreateFile: errno %v", errno)
 	}
 
@@ -263,7 +291,7 @@ func TestIntegrationUnlink(t *testing.T) {
 		t.Fatalf("Unlink: errno %v", errno)
 	}
 
-	_, errno = fs.Stat("delete_me.txt")
+	_, errno = fs.Stat(ctx, "delete_me.txt")
 	if errno != syscall.ENOENT {
 		t.Fatalf("expected ENOENT after Unlink, got %v", errno)
 	}
@@ -273,7 +301,7 @@ func TestIntegrationRmdir(t *testing.T) {
 	fs := testFS(t)
 	ctx := context.Background()
 
-	if errno := fs.MkDir(ctx, "empty_dir"); errno != 0 {
+	if errno := fs.MkDir(ctx, "empty_dir", 0o755); errno != 0 {
 		t.Fatalf("MkDir: errno %v", errno)
 	}
 
@@ -282,7 +310,7 @@ func TestIntegrationRmdir(t *testing.T) {
 		t.Fatalf("Rmdir: errno %v", errno)
 	}
 
-	_, errno = fs.Stat("empty_dir")
+	_, errno = fs.Stat(ctx, "empty_dir")
 	if errno != syscall.ENOENT {
 		t.Fatalf("expected ENOENT after Rmdir, got %v", errno)
 	}
@@ -292,7 +320,7 @@ func TestIntegrationChmod(t *testing.T) {
 	fs := testFS(t)
 	ctx := context.Background()
 
-	if errno := fs.CreateFile(ctx, "chmod_me.txt"); errno != 0 {
+	if errno := fs.CreateFile(ctx, "chmod_me.txt", uint32(os.O_CREATE|os.O_WRONLY|os.O_TRUNC), 0o644); errno != 0 {
 		t.Fatalf("CreateFile: errno %v", errno)
 	}
 
@@ -301,7 +329,7 @@ func TestIntegrationChmod(t *testing.T) {
 		t.Fatalf("Chmod: errno %v", errno)
 	}
 
-	info, errno := fs.Stat("chmod_me.txt")
+	info, errno := fs.Stat(ctx, "chmod_me.txt")
 	if errno != 0 {
 		t.Fatalf("Stat: errno %v", errno)
 	}
@@ -314,7 +342,7 @@ func TestIntegrationTruncate(t *testing.T) {
 	fs := testFS(t)
 	ctx := context.Background()
 
-	if errno := fs.CreateFile(ctx, "trunc.txt"); errno != 0 {
+	if errno := fs.CreateFile(ctx, "trunc.txt", uint32(os.O_CREATE|os.O_WRONLY|os.O_TRUNC), 0o644); errno != 0 {
 		t.Fatalf("CreateFile: errno %v", errno)
 	}
 	if _, errno := fs.WriteFile(ctx, "trunc.txt", []byte("long content here"), 0); errno != 0 {
@@ -326,7 +354,7 @@ func TestIntegrationTruncate(t *testing.T) {
 		t.Fatalf("Truncate: errno %v", errno)
 	}
 
-	info, errno := fs.Stat("trunc.txt")
+	info, errno := fs.Stat(ctx, "trunc.txt")
 	if errno != 0 {
 		t.Fatalf("Stat: errno %v", errno)
 	}

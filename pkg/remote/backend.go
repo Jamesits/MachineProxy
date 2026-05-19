@@ -108,24 +108,51 @@ type RemoteFile interface {
 // and FileClient.OpenFile.
 type RemoteWriteFile interface {
 	io.WriteCloser
+	ReadAt(p []byte, off int64) (int, error)
 	WriteAt(p []byte, off int64) (int, error)
+	Stat() (os.FileInfo, error)
+	Truncate(size int64) error
+	// Sync flushes the file's writes to durable storage on the remote.
+	// Backends whose underlying protocol cannot express fsync (e.g. an
+	// SFTP server that lacks the fsync@openssh.com extension) should
+	// return nil rather than an error so the FUSE layer can treat the
+	// op as a successful no-op.
+	Sync() error
 }
 
-// FileClient is the backend-agnostic file-operation surface. It is the
-// union of what workspacefs.SFTPClient, pathstub.RemoteOpener and
-// agenttransfer's internal remoteFileClient have historically required.
+// Statfs holds filesystem capacity metadata in POSIX statvfs/statfs
+// terms. Zero fields mean the backend could not report that value.
+type Statfs struct {
+	Blocks  uint64
+	Bfree   uint64
+	Bavail  uint64
+	Files   uint64
+	Ffree   uint64
+	Bsize   uint32
+	Frsize  uint32
+	NameLen uint32
+}
+
+// FileClient is the backend-agnostic file-operation surface.
 type FileClient interface {
 	Open(path string) (RemoteFile, error)
 	Create(path string) (RemoteWriteFile, error)
-	OpenFile(path string, flags int) (RemoteWriteFile, error)
+	OpenFile(path string, flags int, mode os.FileMode) (RemoteWriteFile, error)
 	Stat(path string) (os.FileInfo, error)
+	Lstat(path string) (os.FileInfo, error)
 	ReadDir(path string) ([]os.FileInfo, error)
-	Mkdir(path string) error
-	MkdirAll(path string) error
+	Readlink(path string) (string, error)
+	Mkdir(path string, mode os.FileMode) error
+	MkdirAll(path string, mode os.FileMode) error
 	Remove(path string) error
 	Rename(oldpath, newpath string) error
+	Symlink(target, linkpath string) error
+	Link(oldpath, newpath string) error
 	Chmod(path string, mode os.FileMode) error
+	Chown(path string, uid, gid int) error
+	Chtimes(path string, atime, mtime time.Time) error
 	Truncate(path string, size int64) error
+	Statfs(path string) (*Statfs, error)
 	// Getwd returns the remote server's default working directory, used
 	// for "~" expansion. Backends without a meaningful working dir
 	// should return "/".

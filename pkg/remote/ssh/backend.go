@@ -189,7 +189,7 @@ func uploadViaFileClient(fc remote.FileClient, localPath, remotePath string, mod
 	// Best-effort parent mkdir. Required for fresh hosts where the
 	// default ~/.cache/machineproxy/ path doesn't exist yet.
 	if parent := parentDir(resolved); parent != "" && parent != "." && parent != "/" {
-		if err := fc.MkdirAll(parent); err != nil {
+		if err := fc.MkdirAll(parent, 0o755); err != nil {
 			return "", fmt.Errorf("create remote dir %q: %w", parent, err)
 		}
 	}
@@ -198,7 +198,7 @@ func uploadViaFileClient(fc remote.FileClient, localPath, remotePath string, mod
 		return "", err
 	}
 	defer src.Close()
-	dst, err := fc.OpenFile(resolved, os.O_WRONLY|os.O_CREATE|os.O_TRUNC)
+	dst, err := fc.OpenFile(resolved, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
 	if err != nil {
 		return "", err
 	}

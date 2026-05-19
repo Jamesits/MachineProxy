@@ -2,8 +2,11 @@ package agentproto
 
 import (
 	"context"
+	"errors"
 	"io"
+	"os"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -88,6 +91,78 @@ func TestFileOpConcurrent(t *testing.T) {
 	close(errs)
 	for err := range errs {
 		t.Fatalf("concurrent FileOp: %v", err)
+	}
+}
+
+func TestErrRespPreservesPathErrno(t *testing.T) {
+	resp := errResp(&os.PathError{Op: "rmdir", Path: "/tmp/nonempty", Err: syscall.ENOTEMPTY})
+
+	if resp.Errno != uint32(syscall.ENOTEMPTY) {
+		t.Fatalf("errResp errno = %d, want ENOTEMPTY", resp.Errno)
+	}
+	if !errors.Is(syscall.Errno(resp.Errno), syscall.ENOTEMPTY) {
+		t.Fatalf("response errno %d does not map back to ENOTEMPTY", resp.Errno)
+	}
+}
+
+func TestFileOpOpenFileHonorsModeZero(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/private.txt"
+	server := NewFileOpServer()
+	defer server.CloseAll()
+
+	resp := server.Handle(&FileOpReq{Op: FileOpOpenFile, Path: path, Flags: int32(os.O_CREATE | os.O_WRONLY), Mode: 0})
+	if resp.Errno != 0 {
+		t.Fatalf("OpenFile errno = %d (%s), want 0", resp.Errno, resp.ErrMsg)
+	}
+	if closeResp := server.Handle(&FileOpReq{Op: FileOpClose, Handle: resp.Handle}); closeResp.Errno != 0 {
+		t.Fatalf("Close errno = %d (%s), want 0", closeResp.Errno, closeResp.ErrMsg)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0 {
+		t.Fatalf("mode = %o, want 000", got)
+	}
+}
+
+func TestFileOpBadHandleReturnsEBADF(t *testing.T) {
+	server := NewFileOpServer()
+
+	resp := server.Handle(&FileOpReq{Op: FileOpFsync, Handle: 1234})
+
+	if resp.Errno != uint32(syscall.EBADF) {
+		t.Fatalf("Fsync bad handle errno = %d, want EBADF", resp.Errno)
+	}
+}
+
+func TestFileOpAppendWriteUsesOpenFileDescription(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/log.txt"
+	if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	server := NewFileOpServer()
+	defer server.CloseAll()
+
+	openResp := server.Handle(&FileOpReq{Op: FileOpOpenFile, Path: path, Flags: int32(os.O_WRONLY | os.O_APPEND)})
+	if openResp.Errno != 0 {
+		t.Fatalf("OpenFile errno = %d (%s), want 0", openResp.Errno, openResp.ErrMsg)
+	}
+	writeResp := server.Handle(&FileOpReq{Op: FileOpWriteAt, Handle: openResp.Handle, Offset: -1, Data: []byte("new")})
+	if writeResp.Errno != 0 {
+		t.Fatalf("append Write errno = %d (%s), want 0", writeResp.Errno, writeResp.ErrMsg)
+	}
+	if writeResp.N != 3 {
+		t.Fatalf("append Write N = %d, want 3", writeResp.N)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(data) != "oldnew" {
+		t.Fatalf("contents = %q, want oldnew", string(data))
 	}
 }
 
