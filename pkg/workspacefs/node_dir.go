@@ -52,7 +52,7 @@ func (n *dirNode) Getattr(ctx context.Context, _ fs.FileHandle, out *fuse.AttrOu
 	if errno != 0 {
 		return errno
 	}
-	applyFileInfo(&out.Attr, st)
+	n.backend.applyAttr(&out.Attr, st)
 	if out.Mode&uint32(syscall.S_IFMT) == 0 {
 		out.Mode = (out.Mode &^ uint32(syscall.S_IFMT)) | fuse.S_IFDIR
 	}
@@ -75,7 +75,7 @@ func (n *dirNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (
 
 	attr := modeToStable(st.Mode())
 	inode := n.NewInode(ctx, childOps, attr)
-	applyFileInfo(&out.Attr, st)
+	n.backend.applyAttr(&out.Attr, st)
 	out.AttrValid = 1
 	return inode, 0
 }
@@ -96,7 +96,7 @@ func (n *dirNode) Create(ctx context.Context, name string, flags uint32, mode ui
 	}
 	child := &fileNode{backend: n.backend, relPath: rel}
 	inode := n.NewInode(ctx, child, fs.StableAttr{Mode: fuse.S_IFREG})
-	applyFileInfo(&out.Attr, st)
+	n.backend.applyAttr(&out.Attr, st)
 	return inode, handle, fuse.FOPEN_DIRECT_IO, 0
 }
 
@@ -111,7 +111,7 @@ func (n *dirNode) Mkdir(ctx context.Context, name string, mode uint32, out *fuse
 	}
 	child := &dirNode{backend: n.backend, relPath: rel}
 	inode := n.NewInode(ctx, child, fs.StableAttr{Mode: fuse.S_IFDIR})
-	applyFileInfo(&out.Attr, st)
+	n.backend.applyAttr(&out.Attr, st)
 	return inode, 0
 }
 
@@ -131,7 +131,7 @@ func (n *dirNode) Symlink(ctx context.Context, target, name string, out *fuse.En
 	}
 	child := &fileNode{backend: n.backend, relPath: rel}
 	inode := n.NewInode(ctx, child, fs.StableAttr{Mode: fuse.S_IFLNK})
-	applyFileInfo(&out.Attr, st)
+	n.backend.applyAttr(&out.Attr, st)
 	return inode, 0
 }
 
@@ -151,7 +151,7 @@ func (n *dirNode) Link(ctx context.Context, target fs.InodeEmbedder, name string
 	}
 	child := &fileNode{backend: n.backend, relPath: rel}
 	inode := n.NewInode(ctx, child, modeToStable(st.Mode()))
-	applyFileInfo(&out.Attr, st)
+	n.backend.applyAttr(&out.Attr, st)
 	return inode, 0
 }
 
@@ -186,7 +186,7 @@ func (n *dirNode) Access(ctx context.Context, mask uint32) syscall.Errno {
 	if errno != 0 {
 		return errno
 	}
-	if errno := access(ctx, st, mask); errno != 0 {
+	if errno := access(ctx, n.backend, st, mask); errno != 0 {
 		n.backend.log.Debug("fuse access denied", "path", n.relPath, "mask", mask, "mode", st.Mode(), "error", errno)
 		return errno
 	}

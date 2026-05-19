@@ -64,7 +64,7 @@ func testFS(t *testing.T) *FileSystem {
 		cleanupDir(sftpClient, testDir)
 	})
 
-	return New(sftpClientAdapter{c: sftpClient}, testDir, nil)
+	return New(sftpClientAdapter{c: sftpClient}, testDir, nil, nil)
 }
 
 // sftpClientAdapter is the test-local adapter that promotes a real

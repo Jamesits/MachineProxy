@@ -70,7 +70,7 @@ func newWorkspaceFuseHarness(t *testing.T) *workspaceFuseHarness {
 	}
 
 	ctx, cancel := context.WithCancel(context.WithoutCancel(t.Context()))
-	fsys := New(localFileClient{}, backing, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	fsys := New(localFileClient{}, backing, slog.New(slog.NewTextHandler(io.Discard, nil)), &Options{UIDMode: IDModeTransparent, GIDMode: IDModeTransparent})
 	server, err := Mount(ctx, fsys, mount)
 	if err != nil {
 		cancel()

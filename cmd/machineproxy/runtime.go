@@ -298,7 +298,11 @@ func (d *runtimeDeps) MountWorkspace(ctx context.Context) error {
 	}()
 
 	fsLog := d.log.With("component", "fuse")
-	backend := workspacefs.New(fc, mount.RemotePath, fsLog)
+	opts, err := workspacefsOptions(d.cfg)
+	if err != nil {
+		return fmt.Errorf("workspace fs options: %w", err)
+	}
+	backend := workspacefs.New(fc, mount.RemotePath, fsLog, opts)
 	server, err := workspacefs.Mount(ctx, backend, d.fuseMountDir)
 	if err != nil {
 		return fmt.Errorf("mount workspace fuse: %w", err)
@@ -606,6 +610,28 @@ func currentUsername() (string, error) {
 		return "", err
 	}
 	return u.Username, nil
+}
+
+// workspacefsOptions translates the user-facing uid_mode / gid_mode
+// config strings into the workspacefs.Options struct, capturing the
+// local user's UID/GID at the same time so the override mode has
+// something concrete to report.
+func workspacefsOptions(cfg *config.Config) (*workspacefs.Options, error) {
+	opts := &workspacefs.Options{
+		UIDMode: workspacefs.IDMode(cfg.Container.UIDMode),
+		GIDMode: workspacefs.IDMode(cfg.Container.GIDMode),
+	}
+	// Look up the local UID/GID once. On Linux/darwin os.Getuid/Getgid
+	// always succeed; the user.Current() roundtrip would be needed only
+	// to surface the username, which workspacefs does not consume.
+	uid := os.Getuid()
+	gid := os.Getgid()
+	if uid < 0 || gid < 0 {
+		return nil, fmt.Errorf("local uid/gid lookup returned negative values (uid=%d, gid=%d)", uid, gid)
+	}
+	opts.LocalUID = uint32(uid)
+	opts.LocalGID = uint32(gid)
+	return opts, nil
 }
 
 // sshAddrIfSSH returns the backend's address only when the backend is

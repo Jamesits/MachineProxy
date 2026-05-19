@@ -14,6 +14,7 @@ import (
 
 	"github.com/hanwen/go-fuse/v2/fuse"
 
+	"github.com/jamesits/machineproxy/pkg/agentproto"
 	"github.com/jamesits/machineproxy/pkg/remote"
 )
 
@@ -24,7 +25,7 @@ func TestReadFileDelegatesToSFTP(t *testing.T) {
 		},
 	}
 
-	fs := New(client, "/workspace", nil)
+	fs := New(client, "/workspace", nil, nil)
 	data, errno := fs.ReadFile(context.Background(), "hello.txt", 0, 5)
 
 	if errno != 0 {
@@ -40,7 +41,7 @@ func TestReadFileDelegatesToSFTP(t *testing.T) {
 
 func TestReadFileMissingReturnsENOENT(t *testing.T) {
 	client := &fakeSFTPClient{files: map[string][]byte{}}
-	fs := New(client, "/workspace", nil)
+	fs := New(client, "/workspace", nil, nil)
 
 	_, errno := fs.ReadFile(context.Background(), "missing.txt", 0, 128)
 	if errno != syscall.ENOENT {
@@ -55,7 +56,7 @@ func TestWriteFileDelegatesToSFTP(t *testing.T) {
 		},
 	}
 
-	fs := New(client, "/workspace", nil)
+	fs := New(client, "/workspace", nil, nil)
 	n, errno := fs.WriteFile(context.Background(), "out.txt", []byte("written"), 0)
 
 	if errno != 0 {
@@ -75,7 +76,7 @@ func TestWriteFileReturnsAndLogsCloseError(t *testing.T) {
 		files:    map[string][]byte{"/workspace/out.txt": []byte("old")},
 		closeErr: syscall.ENOSPC,
 	}
-	fs := New(client, "/workspace", slog.New(slog.NewTextHandler(&log, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	fs := New(client, "/workspace", slog.New(slog.NewTextHandler(&log, &slog.HandlerOptions{Level: slog.LevelDebug})), nil)
 
 	_, errno := fs.WriteFile(context.Background(), "out.txt", []byte("new"), 0)
 
@@ -89,7 +90,7 @@ func TestWriteFileReturnsAndLogsCloseError(t *testing.T) {
 
 func TestCreateFileDelegatesToSFTP(t *testing.T) {
 	client := &fakeSFTPClient{files: map[string][]byte{}}
-	fs := New(client, "/workspace", nil)
+	fs := New(client, "/workspace", nil, nil)
 
 	errno := fs.CreateFile(context.Background(), "new.txt", uint32(os.O_CREATE|os.O_WRONLY|os.O_TRUNC), 0o644)
 	if errno != 0 {
@@ -102,7 +103,7 @@ func TestCreateFileDelegatesToSFTP(t *testing.T) {
 
 func TestDirNodeCreateHonorsExclusiveFlag(t *testing.T) {
 	client := &fakeSFTPClient{files: map[string][]byte{"/workspace/existing.txt": []byte("keep")}}
-	fs := New(client, "/workspace", nil)
+	fs := New(client, "/workspace", nil, nil)
 	node := &dirNode{backend: fs, relPath: ""}
 
 	_, _, _, errno := node.Create(context.Background(), "existing.txt", uint32(os.O_CREATE|os.O_WRONLY|os.O_EXCL), 0o600, &fuse.EntryOut{})
@@ -117,7 +118,7 @@ func TestDirNodeCreateHonorsExclusiveFlag(t *testing.T) {
 
 func TestCreateFilePassesExclusiveFlagToBackend(t *testing.T) {
 	client := &fakeSFTPClient{files: map[string][]byte{}}
-	fs := New(client, "/workspace", nil)
+	fs := New(client, "/workspace", nil, nil)
 
 	errno := fs.CreateFile(context.Background(), "new.txt", uint32(os.O_CREATE|os.O_WRONLY|os.O_EXCL), 0o600)
 
@@ -131,7 +132,7 @@ func TestCreateFilePassesExclusiveFlagToBackend(t *testing.T) {
 
 func TestDirNodeCreateAppliesRequestedMode(t *testing.T) {
 	client := &fakeSFTPClient{files: map[string][]byte{}}
-	fs := New(client, "/workspace", nil)
+	fs := New(client, "/workspace", nil, nil)
 
 	errno := fs.CreateFile(context.Background(), "created.txt", uint32(os.O_CREATE|os.O_WRONLY), 0o600)
 
@@ -149,7 +150,7 @@ func TestDirNodeCreateAppliesRequestedMode(t *testing.T) {
 
 func TestCreateFileHonorsZeroMode(t *testing.T) {
 	client := &fakeSFTPClient{files: map[string][]byte{}}
-	fs := New(client, "/workspace", nil)
+	fs := New(client, "/workspace", nil, nil)
 
 	errno := fs.CreateFile(context.Background(), "private.txt", uint32(os.O_CREATE|os.O_WRONLY), 0)
 
@@ -167,7 +168,7 @@ func TestCreateFileHonorsZeroMode(t *testing.T) {
 
 func TestFileNodeAppendUsesOpenHandleFlags(t *testing.T) {
 	client := &fakeSFTPClient{files: map[string][]byte{"/workspace/log.txt": []byte("old")}}
-	fs := New(client, "/workspace", nil)
+	fs := New(client, "/workspace", nil, nil)
 	node := &fileNode{backend: fs, relPath: "log.txt"}
 
 	fh, _, errno := node.Open(context.Background(), uint32(os.O_WRONLY|os.O_APPEND))
@@ -185,7 +186,7 @@ func TestFileNodeAppendUsesOpenHandleFlags(t *testing.T) {
 
 func TestFileNodeFsyncUsesOpenHandleAfterUnlink(t *testing.T) {
 	client := &fakeSFTPClient{files: map[string][]byte{"/workspace/out.txt": []byte("data")}}
-	fs := New(client, "/workspace", nil)
+	fs := New(client, "/workspace", nil, nil)
 	node := &fileNode{backend: fs, relPath: "out.txt"}
 
 	fh, _, errno := node.Open(context.Background(), uint32(os.O_WRONLY))
@@ -204,7 +205,7 @@ func TestFileNodeFsyncUsesOpenHandleAfterUnlink(t *testing.T) {
 
 func TestFileNodeGetattrUsesOpenHandleAfterUnlink(t *testing.T) {
 	client := &fakeSFTPClient{files: map[string][]byte{"/workspace/out.txt": []byte("data")}}
-	fs := New(client, "/workspace", nil)
+	fs := New(client, "/workspace", nil, nil)
 	node := &fileNode{backend: fs, relPath: "out.txt"}
 
 	fh, _, errno := node.Open(context.Background(), uint32(os.O_WRONLY))
@@ -229,7 +230,7 @@ func TestFsyncDelegatesToSFTP(t *testing.T) {
 		},
 	}
 
-	fs := New(client, "/workspace", nil)
+	fs := New(client, "/workspace", nil, nil)
 	errno := fs.Fsync(context.Background(), "out.txt")
 	if errno != 0 {
 		t.Fatalf("Fsync() errno = %v, want 0", errno)
@@ -241,7 +242,7 @@ func TestFsyncDelegatesToSFTP(t *testing.T) {
 
 func TestFsyncMissingFileIsNoop(t *testing.T) {
 	client := &fakeSFTPClient{files: map[string][]byte{}}
-	fs := New(client, "/workspace", nil)
+	fs := New(client, "/workspace", nil, nil)
 
 	errno := fs.Fsync(context.Background(), "missing.txt")
 	if errno != syscall.ENOENT {
@@ -257,7 +258,7 @@ func TestFsyncReturnsSyncError(t *testing.T) {
 		files:   map[string][]byte{"/workspace/out.txt": []byte("data")},
 		syncErr: syscall.EIO,
 	}
-	fs := New(client, "/workspace", nil)
+	fs := New(client, "/workspace", nil, nil)
 
 	errno := fs.Fsync(context.Background(), "out.txt")
 	if errno != syscall.EIO {
@@ -267,7 +268,7 @@ func TestFsyncReturnsSyncError(t *testing.T) {
 
 func TestSymlinkPreservesLinkMetadata(t *testing.T) {
 	client := &fakeSFTPClient{files: map[string][]byte{"/workspace/target.txt": []byte("data")}}
-	fs := New(client, "/workspace", nil)
+	fs := New(client, "/workspace", nil, nil)
 
 	if errno := fs.Symlink(context.Background(), "target.txt", "link.txt"); errno != 0 {
 		t.Fatalf("Symlink() errno = %v", errno)
@@ -293,7 +294,7 @@ func TestMkDirDelegatesToSFTP(t *testing.T) {
 		files: map[string][]byte{},
 		dirs:  map[string]bool{},
 	}
-	fs := New(client, "/workspace", nil)
+	fs := New(client, "/workspace", nil, nil)
 
 	errno := fs.MkDir(context.Background(), "subdir", 0o755)
 	if errno != 0 {
@@ -306,7 +307,7 @@ func TestMkDirDelegatesToSFTP(t *testing.T) {
 
 func TestMkDirAppliesRequestedMode(t *testing.T) {
 	client := &fakeSFTPClient{files: map[string][]byte{}, dirs: map[string]bool{}}
-	fs := New(client, "/workspace", nil)
+	fs := New(client, "/workspace", nil, nil)
 
 	errno := fs.MkDir(context.Background(), "private", 0o700)
 
@@ -324,7 +325,7 @@ func TestMkDirAppliesRequestedMode(t *testing.T) {
 
 func TestMkDirHonorsZeroMode(t *testing.T) {
 	client := &fakeSFTPClient{files: map[string][]byte{}, dirs: map[string]bool{}}
-	fs := New(client, "/workspace", nil)
+	fs := New(client, "/workspace", nil, nil)
 
 	errno := fs.MkDir(context.Background(), "closed", 0)
 
@@ -342,7 +343,7 @@ func TestMkDirHonorsZeroMode(t *testing.T) {
 
 func TestUnlinkRejectsDirectory(t *testing.T) {
 	client := &fakeSFTPClient{files: map[string][]byte{}, dirs: map[string]bool{"/workspace/dir": true}}
-	fs := New(client, "/workspace", nil)
+	fs := New(client, "/workspace", nil, nil)
 
 	errno := fs.Unlink(context.Background(), "dir")
 
@@ -356,7 +357,7 @@ func TestUnlinkRejectsDirectory(t *testing.T) {
 
 func TestRmdirRejectsRegularFile(t *testing.T) {
 	client := &fakeSFTPClient{files: map[string][]byte{"/workspace/file.txt": []byte("data")}}
-	fs := New(client, "/workspace", nil)
+	fs := New(client, "/workspace", nil, nil)
 
 	errno := fs.Rmdir(context.Background(), "file.txt")
 
@@ -370,7 +371,7 @@ func TestRmdirRejectsRegularFile(t *testing.T) {
 
 func TestRenameRejectsUnsupportedFlags(t *testing.T) {
 	client := &fakeSFTPClient{files: map[string][]byte{"/workspace/old.txt": []byte("data")}}
-	fs := New(client, "/workspace", nil)
+	fs := New(client, "/workspace", nil, nil)
 	oldDir := &dirNode{backend: fs, relPath: ""}
 	newDir := &dirNode{backend: fs, relPath: ""}
 
@@ -386,7 +387,7 @@ func TestRenameRejectsUnsupportedFlags(t *testing.T) {
 
 func TestDirFsyncSucceedsAsNoop(t *testing.T) {
 	client := &fakeSFTPClient{dirs: map[string]bool{"/workspace": true}}
-	fs := New(client, "/workspace", nil)
+	fs := New(client, "/workspace", nil, nil)
 	node := &dirNode{backend: fs, relPath: ""}
 
 	if errno := node.Fsync(context.Background(), nil, 0); errno != 0 {
@@ -397,7 +398,7 @@ func TestDirFsyncSucceedsAsNoop(t *testing.T) {
 func TestRootAccessRequiresExecuteBitForXOK(t *testing.T) {
 	ctx := &fuse.Context{Caller: fuse.Caller{Owner: fuse.Owner{Uid: 0, Gid: 0}}}
 
-	errno := access(ctx, fakeFileInfo{name: "script", mode: 0o644}, uint32(fuse.X_OK))
+	errno := access(ctx, nil, fakeFileInfo{name: "script", mode: 0o644}, uint32(fuse.X_OK))
 
 	if errno != syscall.EACCES {
 		t.Fatalf("access(root, X_OK, 0644) errno = %v, want EACCES", errno)
@@ -406,7 +407,7 @@ func TestRootAccessRequiresExecuteBitForXOK(t *testing.T) {
 
 func TestSetattrRejectsUnsupportedAttributes(t *testing.T) {
 	client := &fakeSFTPClient{files: map[string][]byte{"/workspace/file.txt": []byte("data")}}
-	fs := New(client, "/workspace", nil)
+	fs := New(client, "/workspace", nil, nil)
 	node := &fileNode{backend: fs, relPath: "file.txt"}
 	in := &fuse.SetAttrIn{}
 	in.Valid = fuse.FATTR_MTIME
@@ -420,7 +421,7 @@ func TestSetattrRejectsUnsupportedAttributes(t *testing.T) {
 
 func TestSetattrRejectsCtime(t *testing.T) {
 	client := &fakeSFTPClient{files: map[string][]byte{"/workspace/file.txt": []byte("data")}}
-	fs := New(client, "/workspace", nil)
+	fs := New(client, "/workspace", nil, nil)
 	node := &fileNode{backend: fs, relPath: "file.txt"}
 	in := &fuse.SetAttrIn{}
 	in.Valid = fuse.FATTR_CTIME
@@ -482,6 +483,153 @@ func TestApplyFileInfoPreservesSpecialModeBits(t *testing.T) {
 	}
 }
 
+func TestApplyAttrOverrideRewritesUIDGID(t *testing.T) {
+	client := &fakeSFTPClient{}
+	fs := New(client, "/workspace", nil, &Options{
+		UIDMode:  IDModeOverride,
+		GIDMode:  IDModeOverride,
+		LocalUID: 1000,
+		LocalGID: 1001,
+	})
+	st := fakeFileInfo{name: "x", mode: 0o644, size: 1, sys: &agentproto.FileStat{UID: 0, GID: 0}}
+
+	var out fuse.Attr
+	fs.applyAttr(&out, st)
+
+	if out.Uid != 1000 || out.Gid != 1001 {
+		t.Fatalf("override mapping: uid/gid = %d/%d, want 1000/1001", out.Uid, out.Gid)
+	}
+}
+
+func TestApplyAttrTransparentPreservesRemoteIDs(t *testing.T) {
+	client := &fakeSFTPClient{}
+	fs := New(client, "/workspace", nil, &Options{
+		UIDMode:  IDModeTransparent,
+		GIDMode:  IDModeTransparent,
+		LocalUID: 1000,
+		LocalGID: 1001,
+	})
+	st := fakeFileInfo{name: "x", mode: 0o644, size: 1, sys: &agentproto.FileStat{UID: 42, GID: 43}}
+
+	var out fuse.Attr
+	fs.applyAttr(&out, st)
+
+	if out.Uid != 42 || out.Gid != 43 {
+		t.Fatalf("transparent mapping: uid/gid = %d/%d, want 42/43", out.Uid, out.Gid)
+	}
+}
+
+func TestApplyAttrMixedOverrideOneDimension(t *testing.T) {
+	client := &fakeSFTPClient{}
+	fs := New(client, "/workspace", nil, &Options{
+		UIDMode:  IDModeOverride,
+		GIDMode:  IDModeTransparent,
+		LocalUID: 1000,
+		LocalGID: 1001,
+	})
+	st := fakeFileInfo{name: "x", mode: 0o644, size: 1, sys: &agentproto.FileStat{UID: 0, GID: 43}}
+
+	var out fuse.Attr
+	fs.applyAttr(&out, st)
+
+	if out.Uid != 1000 {
+		t.Fatalf("override uid: got %d, want 1000", out.Uid)
+	}
+	if out.Gid != 43 {
+		t.Fatalf("transparent gid: got %d, want 43", out.Gid)
+	}
+}
+
+func TestChownOverrideBothIsNoop(t *testing.T) {
+	client := &fakeSFTPClient{files: map[string][]byte{"/workspace/f.txt": []byte("d")}}
+	fs := New(client, "/workspace", nil, &Options{
+		UIDMode: IDModeOverride, GIDMode: IDModeOverride,
+		LocalUID: 1000, LocalGID: 1001,
+	})
+
+	if errno := fs.Chown(context.Background(), "f.txt", 555, 666); errno != 0 {
+		t.Fatalf("Chown override: errno = %v, want 0", errno)
+	}
+	if _, recorded := client.owners["/workspace/f.txt"]; recorded {
+		t.Fatalf("override mode should not forward chown to backend, got %v", client.owners)
+	}
+}
+
+func TestChownTransparentForwards(t *testing.T) {
+	client := &fakeSFTPClient{files: map[string][]byte{"/workspace/f.txt": []byte("d")}}
+	fs := New(client, "/workspace", nil, &Options{
+		UIDMode: IDModeTransparent, GIDMode: IDModeTransparent,
+	})
+
+	if errno := fs.Chown(context.Background(), "f.txt", 555, 666); errno != 0 {
+		t.Fatalf("Chown transparent: errno = %v, want 0", errno)
+	}
+	got, ok := client.owners["/workspace/f.txt"]
+	if !ok {
+		t.Fatalf("transparent mode should forward chown to backend")
+	}
+	if got != [2]int{555, 666} {
+		t.Fatalf("chown forwarded as %v, want [555 666]", got)
+	}
+}
+
+func TestChownMixedOverrideKeepsRemoteSide(t *testing.T) {
+	client := &fakeSFTPClient{
+		files:  map[string][]byte{"/workspace/f.txt": []byte("d")},
+		owners: map[string][2]int{},
+	}
+	// Seed the remote-reported owner so the override-side fallback has
+	// something to read.
+	client.fileSys = map[string]any{"/workspace/f.txt": &agentproto.FileStat{UID: 42, GID: 7}}
+	fs := New(client, "/workspace", nil, &Options{
+		UIDMode: IDModeOverride, GIDMode: IDModeTransparent,
+		LocalUID: 1000, LocalGID: 1001,
+	})
+
+	if errno := fs.Chown(context.Background(), "f.txt", 555, 666); errno != 0 {
+		t.Fatalf("Chown mixed: errno = %v, want 0", errno)
+	}
+	got, ok := client.owners["/workspace/f.txt"]
+	if !ok {
+		t.Fatalf("mixed mode should still forward chown to backend")
+	}
+	// uid is override, so the original remote uid (42) is preserved;
+	// gid is transparent, so the user-supplied 666 lands on the backend.
+	if got != [2]int{42, 666} {
+		t.Fatalf("chown forwarded as %v, want [42 666]", got)
+	}
+}
+
+func TestAccessOverrideTreatsLocalUserAsOwner(t *testing.T) {
+	client := &fakeSFTPClient{}
+	fs := New(client, "/workspace", nil, &Options{
+		UIDMode: IDModeOverride, GIDMode: IDModeOverride,
+		LocalUID: 1000, LocalGID: 1001,
+	})
+	// Remote-reported owner is root, but mode is 0600 — only the owner
+	// can read. With override, the local user (1000) must look like the
+	// owner so default_permissions lets them through.
+	st := fakeFileInfo{name: "x", mode: 0o600, sys: &agentproto.FileStat{UID: 0, GID: 0}}
+	ctx := &fuse.Context{Caller: fuse.Caller{Owner: fuse.Owner{Uid: 1000, Gid: 1001}}}
+
+	if errno := access(ctx, fs, st, uint32(fuse.R_OK|fuse.W_OK)); errno != 0 {
+		t.Fatalf("access(override, owner-only file): errno = %v, want 0", errno)
+	}
+}
+
+func TestAccessTransparentRejectsForeignUser(t *testing.T) {
+	client := &fakeSFTPClient{}
+	fs := New(client, "/workspace", nil, &Options{
+		UIDMode: IDModeTransparent, GIDMode: IDModeTransparent,
+	})
+	st := fakeFileInfo{name: "x", mode: 0o600, sys: &agentproto.FileStat{UID: 0, GID: 0}}
+	ctx := &fuse.Context{Caller: fuse.Caller{Owner: fuse.Owner{Uid: 1000, Gid: 1001}}}
+
+	if errno := access(ctx, fs, st, uint32(fuse.R_OK)); errno != syscall.EACCES {
+		t.Fatalf("access(transparent, owner-only file): errno = %v, want EACCES", errno)
+	}
+}
+
 // fakeSFTPClient is an in-memory remote.FileClient used for unit tests.
 type fakeSFTPClient struct {
 	files         map[string][]byte
@@ -490,6 +638,7 @@ type fakeSFTPClient struct {
 	modes         map[string]os.FileMode
 	owners        map[string][2]int
 	times         map[string][2]time.Time
+	fileSys       map[string]any // optional os.FileInfo.Sys() payload per path
 	lastOpened    string
 	lastOpenFlags int
 	syncedPaths   []string
@@ -553,19 +702,26 @@ func (f *fakeSFTPClient) Lstat(p string) (os.FileInfo, error) {
 func (f *fakeSFTPClient) stat(p string, follow bool) (os.FileInfo, error) {
 	clean := path.Clean(p)
 	if f.dirs[clean] {
-		return fakeFileInfo{name: path.Base(clean), mode: os.ModeDir | f.mode(clean, 0o755)}, nil
+		return fakeFileInfo{name: path.Base(clean), mode: os.ModeDir | f.mode(clean, 0o755), sys: f.sysFor(clean)}, nil
 	}
 	if target, ok := f.symlinks[clean]; ok {
 		if follow {
 			return f.stat(path.Join(path.Dir(clean), target), true)
 		}
-		return fakeFileInfo{name: path.Base(clean), size: int64(len(target)), mode: os.ModeSymlink | f.mode(clean, 0o777)}, nil
+		return fakeFileInfo{name: path.Base(clean), size: int64(len(target)), mode: os.ModeSymlink | f.mode(clean, 0o777), sys: f.sysFor(clean)}, nil
 	}
 	data, ok := f.files[clean]
 	if !ok {
 		return nil, os.ErrNotExist
 	}
-	return fakeFileInfo{name: path.Base(clean), size: int64(len(data)), mode: f.mode(clean, 0o644)}, nil
+	return fakeFileInfo{name: path.Base(clean), size: int64(len(data)), mode: f.mode(clean, 0o644), sys: f.sysFor(clean)}, nil
+}
+
+func (f *fakeSFTPClient) sysFor(p string) any {
+	if f.fileSys == nil {
+		return nil
+	}
+	return f.fileSys[p]
 }
 
 func (f *fakeSFTPClient) ReadDir(string) ([]os.FileInfo, error) {
@@ -811,6 +967,7 @@ type fakeFileInfo struct {
 	size    int64
 	mode    os.FileMode
 	modTime time.Time
+	sys     any
 }
 
 func (f fakeFileInfo) Name() string      { return f.name }
@@ -823,4 +980,4 @@ func (f fakeFileInfo) ModTime() time.Time {
 	return f.modTime
 }
 func (f fakeFileInfo) IsDir() bool { return f.mode.IsDir() }
-func (f fakeFileInfo) Sys() any    { return nil }
+func (f fakeFileInfo) Sys() any    { return f.sys }

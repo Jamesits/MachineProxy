@@ -11,19 +11,61 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/hanwen/go-fuse/v2/fuse"
+
 	"github.com/jamesits/machineproxy/pkg/logging"
 	"github.com/jamesits/machineproxy/pkg/remote"
 )
 
+// IDMode controls how a single ID dimension (uid or gid) is translated
+// between the remote backend and the local FUSE mount. See
+// Options.UIDMode / Options.GIDMode.
+type IDMode string
+
+const (
+	// IDModeTransparent forwards the remote-reported ID through to the
+	// FUSE client unchanged, and forwards chown calls verbatim.
+	IDModeTransparent IDMode = "transparent"
+	// IDModeOverride substitutes the local user's UID/GID on every stat
+	// reply and turns chown into a no-op on that dimension. Useful when
+	// the remote runs as a different user (often root) than the local
+	// process: without it, default_permissions in the kernel denies the
+	// local user access to files the remote claims root owns.
+	IDModeOverride IDMode = "override"
+)
+
+// Options configures FileSystem behaviour that is not derivable from
+// the remote.FileClient alone.
+type Options struct {
+	// UIDMode selects the read/chown UID translation mode. Empty value
+	// defaults to IDModeOverride.
+	UIDMode IDMode
+	// GIDMode selects the read/chown GID translation mode. Empty value
+	// defaults to IDModeOverride.
+	GIDMode IDMode
+	// LocalUID is the UID to report when UIDMode == IDModeOverride.
+	LocalUID uint32
+	// LocalGID is the GID to report when GIDMode == IDModeOverride.
+	LocalGID uint32
+}
+
 // FileSystem backs a FUSE mount with a remote.FileClient. Each op is
 // translated into the corresponding FileClient method call.
 type FileSystem struct {
-	root string
-	sftp remote.FileClient
-	log  *slog.Logger
+	root     string
+	sftp     remote.FileClient
+	log      *slog.Logger
+	uidMode  IDMode
+	gidMode  IDMode
+	localUID uint32
+	localGID uint32
 }
 
-func New(sftp remote.FileClient, root string, log *slog.Logger) *FileSystem {
+// New constructs a FileSystem backed by sftp, rooted at root. opts may
+// be nil to accept the default override mapping with localUID/localGID
+// both zero (mostly useful for tests; production callers should set
+// the local IDs explicitly).
+func New(sftp remote.FileClient, root string, log *slog.Logger, opts *Options) *FileSystem {
 	cleanRoot := path.Clean(root)
 	if cleanRoot == "." {
 		cleanRoot = "/"
@@ -31,7 +73,55 @@ func New(sftp remote.FileClient, root string, log *slog.Logger) *FileSystem {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &FileSystem{root: cleanRoot, sftp: sftp, log: log}
+	fs := &FileSystem{
+		root:    cleanRoot,
+		sftp:    sftp,
+		log:     log,
+		uidMode: IDModeOverride,
+		gidMode: IDModeOverride,
+	}
+	if opts != nil {
+		if opts.UIDMode != "" {
+			fs.uidMode = opts.UIDMode
+		}
+		if opts.GIDMode != "" {
+			fs.gidMode = opts.GIDMode
+		}
+		fs.localUID = opts.LocalUID
+		fs.localGID = opts.LocalGID
+	}
+	return fs
+}
+
+// applyAttr fills out from st and applies the configured uid/gid
+// override. All FUSE attr-emitting paths funnel through this helper so
+// the override is enforced in exactly one place.
+func (f *FileSystem) applyAttr(out *fuse.Attr, st os.FileInfo) {
+	applyFileInfo(out, st)
+	if f.uidMode == IDModeOverride {
+		out.Uid = f.localUID
+	}
+	if f.gidMode == IDModeOverride {
+		out.Gid = f.localGID
+	}
+}
+
+// viewUID returns the UID that the local FUSE side sees for st under
+// the current mapping. Used by the in-process permission check (which
+// must agree with what the kernel will see via default_permissions).
+func (f *FileSystem) viewUID(sys any) uint32 {
+	if f.uidMode == IDModeOverride {
+		return f.localUID
+	}
+	return currentUID(sys)
+}
+
+// viewGID is the GID counterpart to viewUID.
+func (f *FileSystem) viewGID(sys any) uint32 {
+	if f.gidMode == IDModeOverride {
+		return f.localGID
+	}
+	return currentGID(sys)
 }
 
 func (f *FileSystem) ReadFile(ctx context.Context, rel string, off int64, size int) ([]byte, syscall.Errno) {
@@ -218,6 +308,28 @@ func (f *FileSystem) Chmod(ctx context.Context, rel string, mode os.FileMode) sy
 
 func (f *FileSystem) Chown(ctx context.Context, rel string, uid, gid uint32) syscall.Errno {
 	f.log.Log(ctx, logging.LevelTrace, "fuse chown", "path", rel, "uid", uid, "gid", gid)
+	// In override mode the local view of ownership is fabricated, so
+	// any chown the caller issues based on that fake view would, if
+	// forwarded, clobber the real remote ownership. Drop the dimension
+	// that the user opted out of and forward only what remains.
+	uidOverride := f.uidMode == IDModeOverride
+	gidOverride := f.gidMode == IDModeOverride
+	if uidOverride && gidOverride {
+		f.log.Debug("fuse chown: both uid and gid overridden, no-op", "path", rel, "uid", uid, "gid", gid)
+		return 0
+	}
+	if uidOverride || gidOverride {
+		st, errno := f.Stat(ctx, rel)
+		if errno != 0 {
+			return errno
+		}
+		if uidOverride {
+			uid = currentUID(st.Sys())
+		}
+		if gidOverride {
+			gid = currentGID(st.Sys())
+		}
+	}
 	if err := f.sftp.Chown(f.absPath(rel), int(uid), int(gid)); err != nil {
 		f.log.Warn("fuse chown failed", "path", rel, "uid", uid, "gid", gid, "error", err)
 		return toErrno(err)

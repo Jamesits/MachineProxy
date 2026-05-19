@@ -8,7 +8,7 @@ import (
 	"github.com/hanwen/go-fuse/v2/fuse"
 )
 
-func access(ctx context.Context, st os.FileInfo, mask uint32) syscall.Errno {
+func access(ctx context.Context, fs *FileSystem, st os.FileInfo, mask uint32) syscall.Errno {
 	if mask == 0 {
 		return 0
 	}
@@ -21,7 +21,12 @@ func access(ctx context.Context, st os.FileInfo, mask uint32) syscall.Errno {
 	}
 	perm := uint32(st.Mode().Perm())
 	shift := uint(0)
-	uid, gid := currentUID(st.Sys()), currentGID(st.Sys())
+	var uid, gid uint32
+	if fs != nil {
+		uid, gid = fs.viewUID(st.Sys()), fs.viewGID(st.Sys())
+	} else {
+		uid, gid = currentUID(st.Sys()), currentGID(st.Sys())
+	}
 	if fuseCtx != nil {
 		switch {
 		case fuseCtx.Uid == uid:

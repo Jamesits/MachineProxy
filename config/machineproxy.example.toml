@@ -96,6 +96,22 @@ env_remove = [
 # load, so this is on by default. Set to false to opt out.
 # force_resolve_initial_command_locally = true
 
+# How file ownership is translated between the workspace FUSE mount and
+# the remote backend:
+#   "transparent" — report the remote-side uid/gid verbatim and forward
+#                   chown calls unchanged. Use this only when the local
+#                   user and remote user share the same uid/gid space.
+#   "override"    — always report the local user's uid/gid for reads
+#                   and silently drop the corresponding dimension of
+#                   any chown the workload issues. This is the default
+#                   because it lets a non-root local user work with a
+#                   remote that runs as root without tripping the
+#                   kernel's default_permissions check.
+# uid_mode and gid_mode are independent; you can set one to override
+# and the other to transparent.
+# uid_mode = "override"
+# gid_mode = "override"
+
 # [agent]
 
 # Agent env filtering controls which variables are forwarded to the remote.

@@ -11,6 +11,25 @@ import (
 	"strings"
 )
 
+// Recognized values for Container.UIDMode and Container.GIDMode.
+const (
+	// UIDGIDModeTransparent forwards the remote UID/GID through unchanged.
+	UIDGIDModeTransparent = "transparent"
+	// UIDGIDModeOverride rewrites reads to the local user's UID/GID and
+	// silently drops chown attempts that would otherwise propagate the
+	// local user's view of ownership onto the remote.
+	UIDGIDModeOverride = "override"
+)
+
+func validateUIDGIDMode(name, value string) error {
+	switch value {
+	case UIDGIDModeTransparent, UIDGIDModeOverride:
+		return nil
+	default:
+		return fmt.Errorf("%s must be one of %s, %s; got %q", name, UIDGIDModeTransparent, UIDGIDModeOverride, value)
+	}
+}
+
 // Mount represents a parsed container mount entry in docker-compose style.
 // Format: [local_path:]remote_path
 type Mount struct {
@@ -137,6 +156,19 @@ type Config struct {
 		// binfmt_script interpreter). Defaults to true; set false to
 		// opt out.
 		ForceResolveInitialCommandLocally *bool `yaml:"force_resolve_initial_command_locally" toml:"force_resolve_initial_command_locally" json:"force_resolve_initial_command_locally"`
+		// UIDMode controls how the workspace FUSE mount reports file
+		// owner UIDs and how chown(uid, _) calls are forwarded:
+		//   "transparent" — pass the remote UID through unchanged
+		//   "override"    — always report the local user's UID for
+		//                   reads, and silently no-op uid changes on
+		//                   write. This is the default because the
+		//                   remote often runs as a different user
+		//                   (e.g. root) than the local process, and
+		//                   transparent ownership reporting trips
+		//                   default_permissions in the kernel.
+		UIDMode string `yaml:"uid_mode" toml:"uid_mode" json:"uid_mode"`
+		// GIDMode is the GID counterpart to UIDMode; same semantics.
+		GIDMode string `yaml:"gid_mode" toml:"gid_mode" json:"gid_mode"`
 	} `yaml:"container" toml:"container" json:"container"`
 
 	Agent struct {
@@ -192,6 +224,12 @@ func (c *Config) applyDefaults() error {
 	if c.Container.ForceResolveInitialCommandLocally == nil {
 		t := true
 		c.Container.ForceResolveInitialCommandLocally = &t
+	}
+	if c.Container.UIDMode == "" {
+		c.Container.UIDMode = UIDGIDModeOverride
+	}
+	if c.Container.GIDMode == "" {
+		c.Container.GIDMode = UIDGIDModeOverride
 	}
 	// Expand all local-side path fields up front so downstream consumers
 	// only ever see absolute paths. Remote-side fields (AgentRemotePath,
@@ -299,6 +337,12 @@ func (c *Config) Validate() error {
 	case "prepend", "append", "disabled":
 	default:
 		return fmt.Errorf("container.path_proxy must be one of prepend, append, disabled; got %q", c.Container.PathProxy)
+	}
+	if err := validateUIDGIDMode("container.uid_mode", c.Container.UIDMode); err != nil {
+		return err
+	}
+	if err := validateUIDGIDMode("container.gid_mode", c.Container.GIDMode); err != nil {
+		return err
 	}
 	if !filepath.IsAbs(c.Container.PathStubDir) {
 		return fmt.Errorf("container.path_stub_dir must be absolute; got %q", c.Container.PathStubDir)

@@ -31,14 +31,14 @@ func (n *fileNode) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.Attr
 		if err != nil {
 			return toErrno(err)
 		}
-		applyFileInfo(&out.Attr, st)
+		n.backend.applyAttr(&out.Attr, st)
 		return 0
 	}
 	st, errno := n.backend.Stat(ctx, n.relPath)
 	if errno != 0 {
 		return errno
 	}
-	applyFileInfo(&out.Attr, st)
+	n.backend.applyAttr(&out.Attr, st)
 	if out.Mode&uint32(syscall.S_IFMT) == 0 {
 		out.Mode = (out.Mode &^ uint32(syscall.S_IFMT)) | fuse.S_IFREG
 	}
@@ -231,7 +231,7 @@ func (n *fileNode) Access(ctx context.Context, mask uint32) syscall.Errno {
 	if errno != 0 {
 		return errno
 	}
-	if errno := access(ctx, st, mask); errno != 0 {
+	if errno := access(ctx, n.backend, st, mask); errno != 0 {
 		n.backend.log.Debug("fuse access denied", "path", n.relPath, "mask", mask, "mode", st.Mode(), "error", errno)
 		return errno
 	}
