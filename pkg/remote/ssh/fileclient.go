@@ -20,14 +20,18 @@ import (
 type sftpFileClient struct{ c *sftp.Client }
 
 func (a *sftpFileClient) Open(p string) (remote.RemoteFile, error) {
-	return a.c.Open(p)
+	f, err := a.c.Open(p)
+	if err != nil {
+		return nil, err
+	}
+	return sftpRemoteFile{File: f}, nil
 }
 func (a *sftpFileClient) Create(p string) (remote.RemoteWriteFile, error) {
 	f, err := a.c.Create(p)
 	if err != nil {
 		return nil, err
 	}
-	return sftpWriteFile{File: f}, nil
+	return sftpRemoteFile{File: f}, nil
 }
 func (a *sftpFileClient) OpenFile(p string, flags int, mode os.FileMode) (remote.RemoteWriteFile, error) {
 	_, statErr := a.c.Lstat(p)
@@ -41,7 +45,7 @@ func (a *sftpFileClient) OpenFile(p string, flags int, mode os.FileMode) (remote
 			return nil, err
 		}
 	}
-	return sftpWriteFile{File: f}, nil
+	return sftpRemoteFile{File: f}, nil
 }
 func (a *sftpFileClient) Stat(p string) (os.FileInfo, error) {
 	return a.c.Stat(p)
@@ -122,11 +126,11 @@ func expandRemoteHome(fc remote.FileClient, p string) (string, error) {
 // (the remote is always POSIX-style regardless of local OS).
 func parentDir(p string) string { return path.Dir(p) }
 
-type sftpWriteFile struct {
+type sftpRemoteFile struct {
 	*sftp.File
 }
 
-func (f sftpWriteFile) Sync() error {
+func (f sftpRemoteFile) Sync() error {
 	err := f.File.Sync()
 	if isUnsupported(err) {
 		return nil

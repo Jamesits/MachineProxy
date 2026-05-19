@@ -463,20 +463,18 @@ func (f *FileSystem) Statfs(ctx context.Context, rel string, out *remote.Statfs)
 	return 0
 }
 
-// Fsync opens the remote file fresh, asks the backend to flush it to
-// stable storage, then closes the handle. Each FUSE write already opens
-// and closes its own handle, so a per-request handle here is enough to
-// reach the underlying inode; the kernel/server flushes pending writes
-// regardless of which fd issued them.
+// Fsync is the path-based fallback used when FUSE does not provide one
+// of our open file handles. It syncs the file currently named by rel,
+// so callers that have a specific file descriptor should prefer syncing
+// that handle directly.
 //
 // Backends whose protocol cannot express fsync are expected to make
 // Sync a successful no-op; real open/sync failures are returned to the
-// kernel so callers see the same durability errors they would on a local
-// filesystem.
+// kernel.
 func (f *FileSystem) Fsync(ctx context.Context, rel string) syscall.Errno {
 	f.log.Log(ctx, logging.LevelTrace, "fuse fsync", "path", rel)
 	abs := f.absPath(rel)
-	fh, err := f.sftp.OpenFile(abs, os.O_RDONLY, 0)
+	fh, err := f.sftp.Open(abs)
 	if err != nil {
 		f.log.Warn("fuse fsync open failed", "path", rel, "error", err)
 		return toErrno(err)

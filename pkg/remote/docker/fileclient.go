@@ -355,6 +355,11 @@ func (f *remoteFile) Close() error {
 	return err
 }
 
+func (f *remoteFile) Sync() error {
+	_, err := f.c.do(f.c.ctx, &agentproto.FileOpReq{Op: agentproto.FileOpFsync, Handle: f.handle})
+	return err
+}
+
 // remoteWriteFile is the write-side handle returned by Create / OpenFile.
 type remoteWriteFile struct {
 	c      *agentFileClient

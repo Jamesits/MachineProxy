@@ -131,13 +131,18 @@ func (n *fileNode) Write(ctx context.Context, fh fs.FileHandle, data []byte, off
 // a successful write.
 func (n *fileNode) Fsync(ctx context.Context, fh fs.FileHandle, _ uint32) syscall.Errno {
 	if h, ok := fh.(*fileHandle); ok {
-		if h.write == nil {
-			return n.backend.Fsync(ctx, n.relPath)
+		if h.write != nil {
+			if err := h.write.Sync(); err != nil {
+				return toErrno(err)
+			}
+			return 0
 		}
-		if err := h.write.Sync(); err != nil {
-			return toErrno(err)
+		if h.read != nil {
+			if err := h.read.Sync(); err != nil {
+				return toErrno(err)
+			}
+			return 0
 		}
-		return 0
 	}
 	return n.backend.Fsync(ctx, n.relPath)
 }

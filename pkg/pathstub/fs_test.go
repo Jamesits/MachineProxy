@@ -55,6 +55,8 @@ func (f *fakeRemoteFile) ReadAt(p []byte, off int64) (int, error) {
 
 func (f *fakeRemoteFile) Close() error { return nil }
 
+func (f *fakeRemoteFile) Sync() error { return nil }
+
 func TestFileSystemReadProxiesOpener(t *testing.T) {
 	op := &fakeOpener{files: map[string][]byte{
 		"/usr/bin/bash": []byte("ELFBASHELF"),

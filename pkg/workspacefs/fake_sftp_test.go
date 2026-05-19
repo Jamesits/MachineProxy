@@ -38,7 +38,7 @@ func (f *fakeSFTPClient) Open(p string) (remote.RemoteFile, error) {
 	if !ok {
 		return nil, os.ErrNotExist
 	}
-	return &fakeRemoteFile{data: data}, nil
+	return &fakeRemoteFile{client: f, path: f.lastOpened, data: data}, nil
 }
 
 func (f *fakeSFTPClient) Create(p string) (remote.RemoteWriteFile, error) {
@@ -312,8 +312,10 @@ func (f *fakeSFTPClient) Statfs(string) (*remote.Statfs, error) {
 func (f *fakeSFTPClient) Getwd() (string, error) { return "/", nil }
 
 type fakeRemoteFile struct {
-	data []byte
-	pos  int64
+	client *fakeSFTPClient
+	path   string
+	data   []byte
+	pos    int64
 }
 
 type fakeRemoteWriteFile struct {
@@ -343,6 +345,11 @@ func (f *fakeRemoteFile) ReadAt(p []byte, off int64) (int, error) {
 }
 
 func (f *fakeRemoteFile) Close() error { return nil }
+
+func (f *fakeRemoteFile) Sync() error {
+	f.client.syncedPaths = append(f.client.syncedPaths, f.path)
+	return f.client.syncErr
+}
 
 func (f *fakeRemoteWriteFile) Write(p []byte) (int, error) {
 	if f.flags&os.O_APPEND != 0 {

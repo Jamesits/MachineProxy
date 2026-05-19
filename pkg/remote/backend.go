@@ -99,6 +99,10 @@ type Session interface {
 type RemoteFile interface {
 	io.ReadCloser
 	ReadAt(p []byte, off int64) (int, error)
+	// Sync flushes the file's contents and metadata to durable storage
+	// on the remote. Backends whose underlying protocol cannot express
+	// fsync should return nil rather than an unsupported-operation error.
+	Sync() error
 }
 
 // RemoteWriteFile is the write-side handle returned by FileClient.Create

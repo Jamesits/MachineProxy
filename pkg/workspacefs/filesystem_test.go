@@ -234,6 +234,25 @@ func TestFileNodeFsyncUsesOpenHandleAfterUnlink(t *testing.T) {
 	}
 }
 
+func TestFileNodeFsyncUsesReadHandleAfterUnlink(t *testing.T) {
+	client := &fakeSFTPClient{files: map[string][]byte{"/workspace/out.txt": []byte("data")}}
+	fs := New(client, "/workspace", nil, nil)
+	node := &fileNode{backend: fs, relPath: "out.txt"}
+
+	fh, _, errno := node.Open(context.Background(), uint32(os.O_RDONLY))
+	if errno != 0 {
+		t.Fatalf("Open() errno = %v", errno)
+	}
+	delete(client.files, "/workspace/out.txt")
+
+	if errno := node.Fsync(context.Background(), fh, 0); errno != 0 {
+		t.Fatalf("Fsync() errno = %v, want 0", errno)
+	}
+	if len(client.syncedPaths) != 1 || client.syncedPaths[0] != "/workspace/out.txt" {
+		t.Fatalf("synced paths = %v, want [/workspace/out.txt]", client.syncedPaths)
+	}
+}
+
 func TestFileNodeGetattrUsesOpenHandleAfterUnlink(t *testing.T) {
 	client := &fakeSFTPClient{files: map[string][]byte{"/workspace/out.txt": []byte("data")}}
 	fs := New(client, "/workspace", nil, nil)
