@@ -1,3 +1,5 @@
+//go:build linux && mipsle
+
 package tracer
 
 const auditArchMIPSEL = 0x40000008

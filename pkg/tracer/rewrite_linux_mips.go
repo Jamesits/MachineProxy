@@ -1,3 +1,5 @@
+//go:build linux && mips
+
 package tracer
 
 const auditArchMIPS = 0x00000008

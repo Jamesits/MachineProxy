@@ -1,3 +1,5 @@
+//go:build linux && ppc64le
+
 package tracer
 
 const auditArchPPC64LE = 0xC0000015

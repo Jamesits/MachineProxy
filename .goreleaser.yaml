@@ -7,6 +7,9 @@ project_name: machineproxy
 before:
   hooks:
     - go mod tidy
+    # Build the darwin DYLD interposer dylib for both arm64 and amd64.
+    # The script no-ops on non-darwin hosts so CI on Linux is unaffected.
+    - bash darwin/interposer/build.sh
 
 builds:
   - &build-defaults
@@ -36,18 +39,27 @@ builds:
     tags:
       - backend_ssh
       - backend_docker
+    # Host build: linux (bwrap+tracer) and darwin (DYLD interposer).
+    goos:
+      - linux
+      - darwin
 
   - <<: *build-defaults
     skip: false
     id: mproxy-shim
     main: ./cmd/mproxy-shim
     binary: mproxy-shim
+    goos:
+      - linux
+      - darwin
 
   - <<: *build-defaults
     skip: false
     id: mproxy-tracer
     main: ./cmd/mproxy-tracer
     binary: mproxy-tracer
+    # Tracer is Linux-only: depends on ptrace syscall-stops and the
+    # PTRACE_O_* options that have no darwin/BSD/windows equivalent.
 
   - <<: *build-defaults
     skip: false
@@ -70,6 +82,8 @@ archives:
       - machineproxy
       - mproxy-shim
       - mproxy-tracer
+    # darwin archives intentionally lack mproxy-tracer (Linux-only).
+    allow_different_binary_count: true
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     formats:
       - tar.gz
@@ -77,6 +91,14 @@ archives:
       - src: dist/agent/**/mproxy-agent*
         dst: agent
         strip_parent: false
+      # darwin-only DYLD interposer dylib produced by darwin/interposer/build.sh.
+      # The script writes outside dist/ so its output survives goreleaser's
+      # distribution-directory cleanup; we map the per-arch tree into the
+      # archive at the standard agent/darwin/<arch>/ layout.
+      - src: darwin/interposer/build/arm64/libmproxy_interposer.dylib
+        dst: agent/darwin/arm64/libmproxy_interposer.dylib
+      - src: darwin/interposer/build/amd64/libmproxy_interposer.dylib
+        dst: agent/darwin/amd64/libmproxy_interposer.dylib
 
 nfpms:
   - id: machineproxy
