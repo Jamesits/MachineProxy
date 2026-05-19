@@ -1,5 +1,8 @@
 name: "Renovate Config Validation"
 
+permissions:
+  contents: read
+
 on:
   push:
     paths:
@@ -7,6 +10,7 @@ on:
   pull_request:
     paths:
       - renovate.json
+
 jobs:
   renovate-config-validation:
     runs-on: ubuntu-latest
