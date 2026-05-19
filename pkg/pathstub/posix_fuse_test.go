@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -72,8 +73,8 @@ func TestPathstubFUSEReadOnlyConformance(t *testing.T) {
 	if string(data) != "tool-content" {
 		t.Fatalf("tool contents = %q, want tool-content", data)
 	}
-	if h.opener.lastOpened != h.remotePath("tool") {
-		t.Fatalf("opener path = %q, want %q", h.opener.lastOpened, h.remotePath("tool"))
+	if got := h.opener.LastOpened(); got != h.remotePath("tool") {
+		t.Fatalf("opener path = %q, want %q", got, h.remotePath("tool"))
 	}
 
 	if _, err := os.Stat(filepath.Join(h.mount, "missing")); !errors.Is(err, os.ErrNotExist) {
@@ -157,12 +158,21 @@ func (h *pathstubFuseHarness) remotePath(name string) string {
 }
 
 type pathstubLocalOpener struct {
+	mu         sync.Mutex
 	lastOpened string
 }
 
 func (o *pathstubLocalOpener) Open(path string) (remote.RemoteFile, error) {
+	o.mu.Lock()
 	o.lastOpened = path
+	o.mu.Unlock()
 	return os.Open(path)
+}
+
+func (o *pathstubLocalOpener) LastOpened() string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.lastOpened
 }
 
 func assertReadOnlyError(t *testing.T, op string, err error) {
