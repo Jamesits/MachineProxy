@@ -213,6 +213,10 @@ func (d *runtimeDeps) EnterNamespace(ctx context.Context) error {
 }
 
 func (d *runtimeDeps) MountWorkspace(ctx context.Context) error {
+	if err := preflightFUSE(); err != nil {
+		return err
+	}
+
 	mount, err := config.ParseMount(d.cfg.Container.Mounts[0])
 	if err != nil {
 		return fmt.Errorf("parse workspace mount: %w", err)
@@ -252,7 +256,29 @@ func (d *runtimeDeps) MountWorkspace(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("create temp mountpoint: %w", err)
 	}
+	// Canonicalize the path so it matches what the child sees via
+	// os.Getwd later. On darwin, /var → /private/var is a symlink that
+	// otherwise breaks the broker's pathMapper prefix match.
+	if resolved, rerr := filepath.EvalSymlinks(tmpDir); rerr == nil {
+		tmpDir = resolved
+	}
 	d.fuseMountDir = tmpDir
+
+	// On darwin there is no kernel-level bind-mount equivalent, so the
+	// FUSE mount lives at its real temp path rather than being mapped
+	// into a stable container_path. Rewrite the mount metadata to that
+	// real path; the broker's pathMapper translates that prefix to the
+	// remote path when forwarding execs and file requests.
+	if runtime.GOOS == "darwin" && mount.ContainerPath != tmpDir {
+		if mount.ContainerPath != "" {
+			d.log.Warn("darwin: overriding container_path with FUSE mount dir (no bind-mount available)",
+				"configured", mount.ContainerPath,
+				"effective", tmpDir,
+			)
+		}
+		mount.ContainerPath = tmpDir
+		d.workspaceMount = mount
+	}
 
 	success := false
 	defer func() {
@@ -526,12 +552,6 @@ func (d *runtimeDeps) RunChild(ctx context.Context, cmdline []string) error {
 		return errors.New("missing child command")
 	}
 
-	tracerBin, err := config.ResolveTracerPath(d.cfg.Components.TracerPath)
-	if err != nil {
-		return err
-	}
-	d.log.Log(ctx, logging.LevelTrace, "resolved tracer binary", "path", tracerBin)
-
 	shimBin, err := config.ResolveShimPath(d.cfg.Components.ShimPath)
 	if err != nil {
 		return err
@@ -545,14 +565,18 @@ func (d *runtimeDeps) RunChild(ctx context.Context, cmdline []string) error {
 			Position: d.cfg.Container.PathProxy,
 		}
 	}
+	// Apply the user's env_remove patterns to the inherited shell env
+	// BEFORE FormatEnv injects MPROXY_BROKER_SOCK and MPROXY_SHIM_PATH.
+	// Otherwise the default container.env_remove ("MPROXY_*") would
+	// strip our own variables, leaving the shim/dylib with no way to
+	// find the broker socket.
+	base := envfilter.Remove(os.Environ(), d.cfg.Container.EnvRemove)
 	env := ns.FormatEnv(
-		os.Environ(),
+		base,
 		d.brokerSocket,
 		shimBin,
 		pathInj,
 	)
-
-	env = envfilter.Remove(env, d.cfg.Container.EnvRemove)
 
 	mount := d.workspaceMount
 
@@ -567,20 +591,13 @@ func (d *runtimeDeps) RunChild(ctx context.Context, cmdline []string) error {
 		binds = append(binds, ns.Bind{Src: d.pathStubMountDir, Dst: d.cfg.Container.PathStubDir})
 	}
 
-	tracerArgs := []string{
-		tracerBin,
-		"--shim-path", shimBin,
-		"--broker-sock", d.brokerSocket,
-		"--log-level", d.cfg.LogLevel,
+	childArgv, childEnv, err := d.buildChildInvocation(ctx, cmdline, shimBin, env)
+	if err != nil {
+		return err
 	}
-	if len(d.cfg.Container.LocalCommands) > 0 {
-		tracerArgs = append(tracerArgs, "--whitelist", strings.Join(d.cfg.Container.LocalCommands, ":"))
-	}
-	tracerArgs = append(tracerArgs, "--")
-	tracerArgs = append(tracerArgs, cmdline...)
 
-	d.log.Log(ctx, logging.LevelTrace, "launching child via tracer", "tracer", tracerBin, "command", cmdline)
-	return d.namespace.Run(ctx, workingDir, tracerArgs, env, binds)
+	d.log.Log(ctx, logging.LevelTrace, "launching child", "command", childArgv)
+	return d.namespace.Run(ctx, workingDir, childArgv, childEnv, binds)
 }
 
 func currentUsername() (string, error) {

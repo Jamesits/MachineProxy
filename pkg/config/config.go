@@ -147,6 +147,7 @@ type Config struct {
 	Components struct {
 		ShimPath        string `yaml:"shim_path" toml:"shim_path" json:"shim_path"`
 		TracerPath      string `yaml:"tracer_path" toml:"tracer_path" json:"tracer_path"`
+		InterposerPath  string `yaml:"interposer_path" toml:"interposer_path" json:"interposer_path"`
 		AgentLocalPath  string `yaml:"agent_local_path" toml:"agent_local_path" json:"agent_local_path"`
 		AgentRemotePath string `yaml:"agent_remote_path" toml:"agent_remote_path" json:"agent_remote_path"`
 	} `yaml:"components" toml:"components" json:"components"`
@@ -205,6 +206,7 @@ func (c *Config) applyDefaults() error {
 		{"container.working_dir", &c.Container.WorkingDir},
 		{"components.shim_path", &c.Components.ShimPath},
 		{"components.tracer_path", &c.Components.TracerPath},
+		{"components.interposer_path", &c.Components.InterposerPath},
 		{"components.agent_local_path", &c.Components.AgentLocalPath},
 		{"recording.path", &c.Recording.Path},
 	} {
@@ -239,6 +241,11 @@ func (c *Config) applyDefaults() error {
 	if c.Components.TracerPath != "" {
 		if !filepath.IsAbs(c.Components.TracerPath) {
 			return errors.New("components.tracer_path must be absolute")
+		}
+	}
+	if c.Components.InterposerPath != "" {
+		if !filepath.IsAbs(c.Components.InterposerPath) {
+			return errors.New("components.interposer_path must be absolute")
 		}
 	}
 	return nil

@@ -85,3 +85,34 @@ jobs:
         if: always()
         working-directory: test/ssh-server/${{ matrix.template }}
         run: docker compose down -v
+
+  test-darwin:
+    name: Test (darwin)
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          cache: false
+
+      - run: go mod download
+
+      # Unit tests only on darwin; integration tests still rely on the
+      # Linux SSH server matrix. Run with backend tags so all backend
+      # packages compile and test against their mocks.
+      #
+      # TMPDIR override: macOS's default $TMPDIR (/var/folders/...) is
+      # long enough to push unix-socket paths past the 104-byte sun_path
+      # limit. /tmp is short enough that broker.sock fits.
+      - name: Run unit tests
+        env:
+          TMPDIR: /tmp
+        run: go test -race -tags backend_ssh,backend_docker -count=1 ./...

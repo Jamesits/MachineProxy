@@ -4,18 +4,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 // Packager-overridable path defaults. These are var (not const) so a
 // downstream packager can repoint them at build time via, e.g.:
 //
 //	go build -ldflags "-X github.com/jamesits/machineproxy/pkg/config.LibDir=/opt/machineproxy/lib"
+//
+// LibDir's default is OS-specific and lives in paths_<goos>.go.
 var (
-	// LibDir is the install location for machineproxy support binaries
-	// (mproxy-shim, mproxy-tracer, and the per-OS/arch agent layout
-	// under <LibDir>/agent/<goos>/<goarch>/).
-	LibDir = "/usr/lib/machineproxy"
-
 	// DefaultAgentRemotePath is the upload destination for mproxy-agent
 	// on the remote host. A leading "~" is expanded against the remote
 	// user's home directory at SFTP-use time.
@@ -62,6 +60,19 @@ func ResolveAgentBinaryPath(configPath, goos, goarch string) (string, error) {
 	}
 	return resolveBinary(name, configPath, []string{
 		filepath.Join(LibDir, "agent", goos, goarch, name),
+	})
+}
+
+// ResolveInterposerPath finds the libmproxy_interposer.dylib bundle for
+// the local darwin host. It looks adjacent to the running machineproxy
+// binary first (development layout), then under <LibDir>/agent/darwin/
+// <goarch>/ (install layout, mirroring ResolveAgentBinaryPath). On
+// non-darwin hosts the dylib is not used; callers should branch on
+// runtime.GOOS before invoking this.
+func ResolveInterposerPath(configPath string) (string, error) {
+	const name = "libmproxy_interposer.dylib"
+	return resolveBinary(name, configPath, []string{
+		filepath.Join(LibDir, "agent", "darwin", runtime.GOARCH, name),
 	})
 }
 

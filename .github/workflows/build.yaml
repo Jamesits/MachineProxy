@@ -56,6 +56,49 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  build-darwin:
+    name: Build (darwin)
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          cache: false
+
+      - run: go mod download
+
+      # The host binaries (machineproxy, mproxy-shim) are darwin-capable;
+      # mproxy-tracer is Linux-only and excluded via build tags. Verify
+      # the per-binary darwin build succeeds for both architectures.
+      - name: Build host binaries (darwin arm64)
+        env:
+          GOOS: darwin
+          GOARCH: arm64
+        run: |
+          go build -tags backend_ssh,backend_docker -o /tmp/machineproxy ./cmd/machineproxy
+          go build -o /tmp/mproxy-shim ./cmd/mproxy-shim
+
+      - name: Build host binaries (darwin amd64)
+        env:
+          GOOS: darwin
+          GOARCH: amd64
+        run: |
+          go build -tags backend_ssh,backend_docker -o /tmp/machineproxy-amd64 ./cmd/machineproxy
+          go build -o /tmp/mproxy-shim-amd64 ./cmd/mproxy-shim
+
+      - name: go vet
+        env:
+          GOOS: darwin
+        run: go vet -tags backend_ssh,backend_docker ./...
+
   e2e:
     name: E2E (${{ matrix.template }})
     runs-on: ubuntu-latest

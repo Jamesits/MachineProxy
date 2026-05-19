@@ -73,8 +73,8 @@ Requirements:
 
 - Golang
 - Goreleaser 2+
-- [Bubblewrap](https://github.com/containers/bubblewrap)
-- [FUSE](https://sourceforge.net/projects/fuse/)
+- [Bubblewrap](https://github.com/containers/bubblewrap) (Linux)
+- [FUSE](https://sourceforge.net/projects/fuse/) (Linux) | [macFUSE](https://macfuse.io) (macOS)
 
 Building:
 
@@ -116,9 +116,33 @@ The program is launched with a quasi-remote environment.
 
 ### Compatibility, or how good it is
 
-Local device must be Linux. Golang runtime requires Linux 3.2 or later; [support differs on different architectures](https://go.dev/wiki/MinimumRequirements#linuxlinux).
+#### Local
+
+##### Linux
+
+Programs are launched inside a Bubblewrap container and traced via `ptrace` for transparent exec/file proxying. Golang runtime requires Linux 3.2 or later; [support differs on different architectures](https://go.dev/wiki/MinimumRequirements#linuxlinux). Runtime dependencies: `bubblewrap`, `fuse`.
+
+##### macOS
+
+macOS support is highly experimental.
+
+Runtime dependency: [macFUSE](https://macfuse.io) (`brew install --cask macfuse`).
+
+On macOS the host has no containment. Workspace files are exposed via macFUSE (install with `brew install --cask macfuse`) and exec interception is delivered by `libmproxy_interposer.dylib` injected via `DYLD_INSERT_LIBRARIES`.
+
+Apple ships most `/usr/bin` tools with the hardened runtime, which strips `DYLD_INSERT_LIBRARIES` at exec time. Those binaries always run locally even without an entry in local_commands. Install Homebrew equivalents (e.g. coreutils, git, llvm) into /opt/homebrew/bin if you need them routed to the remote.
+
+Working dir configuration is ignored: there is no bind-mount equivalent, so the FUSE mount lives at the temp path machineproxy creates at startup and the broker's path mapper rewrites that prefix to the remote workspace path automatically.
+
+Whitelist semantics: the darwin interposer dylib supports exact-path and basename entries in local_commands; regex entries (`/pattern/`) fall through to the remote (limitation of the C implementation).
+
+Set the env var `MPROXY_INTERPOSER_STRIP_DYLD_ON_WHITELIST=1` to make the dylib remove DYLD_INSERT_LIBRARIES from the env passed to whitelisted commands. Useful when a whitelisted process (make, bash, etc.) spawns lots of local-only subcommands and you want those subtrees to run without the interposer. Non-whitelisted execs still chain the dylib into the child as usual.
+
+#### Remote
 
 The remote agent (`mproxy-agent`) must be compiled for the remote device's OS and architecture. The official packages contain `amd64` (v1) and `arm64` (v8) builds. If you need agents for other architectures or variants, you must compile them yourself. I can't test those builds because I don't have the hardware, so bugs might exist; bug reports and contributions are welcome.
+
+#### Target Program
 
 MachineProxy is designed to work with most programs, including editors and CLI-based AI coding agents. Most use cases are covered, but edge cases exist and some may be impossible to fix completely.
 

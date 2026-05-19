@@ -134,6 +134,7 @@ env_remove = [
 # [components]
 # shim_path = "/usr/lib/machineproxy/mproxy-shim"
 # tracer_path = "/usr/lib/machineproxy/mproxy-tracer"
+# interposer_path = "/usr/local/lib/machineproxy/agent/darwin/arm64/libmproxy_interposer.dylib"  # darwin only; replaces the tracer
 # agent_local_path = "/usr/lib/machineproxy/agent/linux/amd64/mproxy-agent"
 # agent_remote_path = "/tmp/mproxy-agent"
 
