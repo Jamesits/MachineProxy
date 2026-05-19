@@ -1,8 +1,10 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -767,6 +769,122 @@ func TestLoadParsesJSONConfig(t *testing.T) {
 	}
 	if len(cfg.Container.LocalCommands) != 1 || cfg.Container.LocalCommands[0] != "/usr/bin/env" {
 		t.Fatalf("unexpected local_commands: %#v", cfg.Container.LocalCommands)
+	}
+}
+
+func TestCompileIDMapEntryNumericPair(t *testing.T) {
+	got, err := CompileIDMapEntry("0:1000", nil)
+	if err != nil {
+		t.Fatalf("CompileIDMapEntry: %v", err)
+	}
+	want := IDMapEntry{RemoteID: 0, LocalID: 1000, Count: 1}
+	if got != want {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+}
+
+func TestCompileIDMapEntryNumericRange(t *testing.T) {
+	got, err := CompileIDMapEntry("1000:2000:50", nil)
+	if err != nil {
+		t.Fatalf("CompileIDMapEntry: %v", err)
+	}
+	want := IDMapEntry{RemoteID: 1000, LocalID: 2000, Count: 50}
+	if got != want {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+}
+
+func TestCompileIDMapEntryNameResolution(t *testing.T) {
+	lookup := func(name string) (uint32, error) {
+		if name == "alice" {
+			return 5000, nil
+		}
+		return 0, errors.New("unknown")
+	}
+	got, err := CompileIDMapEntry("alice:1000:10", lookup)
+	if err != nil {
+		t.Fatalf("CompileIDMapEntry: %v", err)
+	}
+	want := IDMapEntry{RemoteID: 5000, LocalID: 1000, Count: 10}
+	if got != want {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+}
+
+func TestCompileIDMapEntryNameRequiresLookup(t *testing.T) {
+	_, err := CompileIDMapEntry("alice:1000", nil)
+	if err == nil || !strings.Contains(err.Error(), "no name lookup") {
+		t.Fatalf("expected missing-lookup error, got %v", err)
+	}
+}
+
+func TestCompileIDMapEntryLookupFailurePropagates(t *testing.T) {
+	lookup := func(string) (uint32, error) { return 0, errors.New("nope") }
+	_, err := CompileIDMapEntry("alice:1000", lookup)
+	if err == nil || !strings.Contains(err.Error(), "nope") {
+		t.Fatalf("expected lookup error, got %v", err)
+	}
+}
+
+func TestCompileIDMapEntryRejectsBadFormat(t *testing.T) {
+	cases := []string{
+		"",
+		"1000",
+		"1000:2000:3000:4000",
+		"1000:abc",
+		"abc:1000",
+		"1000:2000:0",
+		"1000:2000:abc",
+	}
+	for _, s := range cases {
+		t.Run(s, func(t *testing.T) {
+			if _, err := CompileIDMapEntry(s, nil); err == nil {
+				t.Fatalf("CompileIDMapEntry(%q) succeeded, want error", s)
+			}
+		})
+	}
+}
+
+func TestLoadParsesUIDGIDMap(t *testing.T) {
+	raw := `
+remote:
+  ssh:
+    host: 127.0.0.1
+container:
+  mounts:
+    - /workspace
+  uid_map:
+    - "0:1000"
+    - "10:20:5"
+  gid_map:
+    - "0:1000"
+`
+	cfg, err := Load(strings.NewReader(raw))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got, want := cfg.Container.UIDMap, []string{"0:1000", "10:20:5"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("UIDMap = %v, want %v", got, want)
+	}
+	if got, want := cfg.Container.GIDMap, []string{"0:1000"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("GIDMap = %v, want %v", got, want)
+	}
+}
+
+func TestLoadRejectsInvalidUIDMap(t *testing.T) {
+	raw := `
+remote:
+  ssh:
+    host: 127.0.0.1
+container:
+  mounts:
+    - /workspace
+  uid_map:
+    - "1000:abc"
+`
+	_, err := Load(strings.NewReader(raw))
+	if err == nil || !strings.Contains(err.Error(), "container.uid_map") {
+		t.Fatalf("expected uid_map validation error, got %v", err)
 	}
 }
 

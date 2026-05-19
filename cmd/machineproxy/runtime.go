@@ -615,12 +615,23 @@ func currentUsername() (string, error) {
 // workspacefsOptions translates the user-facing uid_mode / gid_mode
 // config strings into the workspacefs.Options struct, capturing the
 // local user's UID/GID at the same time so the override mode has
-// something concrete to report.
+// something concrete to report. uid_map / gid_map entries are also
+// compiled here; they take precedence over the mode fallback.
 func workspacefsOptions(cfg *config.Config) (*workspacefs.Options, error) {
 	opts := &workspacefs.Options{
 		UIDMode: workspacefs.IDMode(cfg.Container.UIDMode),
 		GIDMode: workspacefs.IDMode(cfg.Container.GIDMode),
 	}
+	uidMap, err := compileIDMap(cfg.Container.UIDMap, config.LookupUID, "container.uid_map")
+	if err != nil {
+		return nil, err
+	}
+	gidMap, err := compileIDMap(cfg.Container.GIDMap, config.LookupGroupGID, "container.gid_map")
+	if err != nil {
+		return nil, err
+	}
+	opts.UIDMap = uidMap
+	opts.GIDMap = gidMap
 	// Look up the local UID/GID once. On Linux/darwin os.Getuid/Getgid
 	// always succeed; the user.Current() roundtrip would be needed only
 	// to surface the username, which workspacefs does not consume.
@@ -632,6 +643,25 @@ func workspacefsOptions(cfg *config.Config) (*workspacefs.Options, error) {
 	opts.LocalUID = uint32(uid)
 	opts.LocalGID = uint32(gid)
 	return opts, nil
+}
+
+func compileIDMap(entries []string, lookup config.IDLookup, field string) ([]workspacefs.IDMapEntry, error) {
+	if len(entries) == 0 {
+		return nil, nil
+	}
+	out := make([]workspacefs.IDMapEntry, 0, len(entries))
+	for _, raw := range entries {
+		e, err := config.CompileIDMapEntry(raw, lookup)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", field, err)
+		}
+		out = append(out, workspacefs.IDMapEntry{
+			RemoteID: e.RemoteID,
+			LocalID:  e.LocalID,
+			Count:    e.Count,
+		})
+	}
+	return out, nil
 }
 
 // sshAddrIfSSH returns the backend's address only when the backend is

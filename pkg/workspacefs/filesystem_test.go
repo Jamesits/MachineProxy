@@ -617,6 +617,151 @@ func TestAccessOverrideTreatsLocalUserAsOwner(t *testing.T) {
 	}
 }
 
+func TestApplyAttrUIDMapTakesPrecedenceOverOverride(t *testing.T) {
+	client := &fakeSFTPClient{}
+	fs := New(client, "/workspace", nil, &Options{
+		UIDMode:  IDModeOverride,
+		GIDMode:  IDModeOverride,
+		LocalUID: 1000,
+		LocalGID: 1001,
+		UIDMap:   []IDMapEntry{{RemoteID: 0, LocalID: 5000, Count: 1}},
+		GIDMap:   []IDMapEntry{{RemoteID: 0, LocalID: 5001, Count: 1}},
+	})
+	st := fakeFileInfo{name: "x", mode: 0o644, size: 1, sys: &agentproto.FileStat{UID: 0, GID: 0}}
+
+	var out fuse.Attr
+	fs.applyAttr(&out, st)
+
+	if out.Uid != 5000 || out.Gid != 5001 {
+		t.Fatalf("map should beat override: uid/gid = %d/%d, want 5000/5001", out.Uid, out.Gid)
+	}
+}
+
+func TestApplyAttrUIDMapRangeOffset(t *testing.T) {
+	client := &fakeSFTPClient{}
+	fs := New(client, "/workspace", nil, &Options{
+		UIDMode: IDModeTransparent,
+		GIDMode: IDModeTransparent,
+		UIDMap:  []IDMapEntry{{RemoteID: 100, LocalID: 200, Count: 10}},
+	})
+	st := fakeFileInfo{name: "x", mode: 0o644, sys: &agentproto.FileStat{UID: 105, GID: 7}}
+
+	var out fuse.Attr
+	fs.applyAttr(&out, st)
+
+	if out.Uid != 205 {
+		t.Fatalf("range mapping uid = %d, want 205", out.Uid)
+	}
+	if out.Gid != 7 {
+		t.Fatalf("unmapped gid = %d, want 7 (transparent)", out.Gid)
+	}
+}
+
+func TestApplyAttrUIDMapMissEntryFallsBackToMode(t *testing.T) {
+	client := &fakeSFTPClient{}
+	fs := New(client, "/workspace", nil, &Options{
+		UIDMode:  IDModeOverride,
+		GIDMode:  IDModeTransparent,
+		LocalUID: 1000,
+		UIDMap:   []IDMapEntry{{RemoteID: 0, LocalID: 5000, Count: 1}},
+	})
+	// Remote UID 99 is not in the map → override fallback wins.
+	st := fakeFileInfo{name: "x", mode: 0o644, sys: &agentproto.FileStat{UID: 99, GID: 7}}
+
+	var out fuse.Attr
+	fs.applyAttr(&out, st)
+
+	if out.Uid != 1000 {
+		t.Fatalf("uid = %d, want 1000 (override fallback)", out.Uid)
+	}
+	if out.Gid != 7 {
+		t.Fatalf("gid = %d, want 7 (transparent fallback)", out.Gid)
+	}
+}
+
+func TestChownUIDMapTranslatesLocalToRemote(t *testing.T) {
+	client := &fakeSFTPClient{files: map[string][]byte{"/workspace/f.txt": []byte("d")}}
+	fs := New(client, "/workspace", nil, &Options{
+		UIDMode: IDModeOverride, GIDMode: IDModeOverride,
+		LocalUID: 1000, LocalGID: 1001,
+		UIDMap: []IDMapEntry{{RemoteID: 0, LocalID: 5000, Count: 1}},
+		GIDMap: []IDMapEntry{{RemoteID: 0, LocalID: 5000, Count: 1}},
+	})
+
+	if errno := fs.Chown(context.Background(), "f.txt", 5000, 5000); errno != 0 {
+		t.Fatalf("Chown mapped: errno = %v", errno)
+	}
+	got, ok := client.owners["/workspace/f.txt"]
+	if !ok {
+		t.Fatalf("mapped chown should forward to backend, got %v", client.owners)
+	}
+	if got != [2]int{0, 0} {
+		t.Fatalf("chown forwarded as %v, want [0 0]", got)
+	}
+}
+
+func TestChownUIDMapMissOverrideStillNoops(t *testing.T) {
+	client := &fakeSFTPClient{files: map[string][]byte{"/workspace/f.txt": []byte("d")}}
+	fs := New(client, "/workspace", nil, &Options{
+		UIDMode: IDModeOverride, GIDMode: IDModeOverride,
+		LocalUID: 1000, LocalGID: 1001,
+		UIDMap: []IDMapEntry{{RemoteID: 0, LocalID: 5000, Count: 1}},
+	})
+
+	// uid=9999 is not in the map; override mode means preserve remote.
+	if errno := fs.Chown(context.Background(), "f.txt", 9999, 9999); errno != 0 {
+		t.Fatalf("Chown unmapped override: errno = %v", errno)
+	}
+	if _, recorded := client.owners["/workspace/f.txt"]; recorded {
+		t.Fatalf("unmapped override should not forward chown, got %v", client.owners)
+	}
+}
+
+func TestChownUIDMapMissTransparentForwards(t *testing.T) {
+	client := &fakeSFTPClient{files: map[string][]byte{"/workspace/f.txt": []byte("d")}}
+	fs := New(client, "/workspace", nil, &Options{
+		UIDMode: IDModeTransparent, GIDMode: IDModeTransparent,
+		UIDMap: []IDMapEntry{{RemoteID: 0, LocalID: 5000, Count: 1}},
+	})
+
+	if errno := fs.Chown(context.Background(), "f.txt", 9999, 9999); errno != 0 {
+		t.Fatalf("Chown unmapped transparent: errno = %v", errno)
+	}
+	got, ok := client.owners["/workspace/f.txt"]
+	if !ok {
+		t.Fatalf("unmapped transparent should forward chown, got %v", client.owners)
+	}
+	if got != [2]int{9999, 9999} {
+		t.Fatalf("chown forwarded as %v, want [9999 9999]", got)
+	}
+}
+
+func TestChownUIDMapMixedOnePerDimension(t *testing.T) {
+	client := &fakeSFTPClient{
+		files:   map[string][]byte{"/workspace/f.txt": []byte("d")},
+		owners:  map[string][2]int{},
+		fileSys: map[string]any{"/workspace/f.txt": &agentproto.FileStat{UID: 42, GID: 7}},
+	}
+	// UID mapped (local 5000 → remote 0), GID unmapped, gid_mode override
+	// (preserve remote 7).
+	fs := New(client, "/workspace", nil, &Options{
+		UIDMode: IDModeOverride, GIDMode: IDModeOverride,
+		LocalUID: 1000, LocalGID: 1001,
+		UIDMap: []IDMapEntry{{RemoteID: 0, LocalID: 5000, Count: 1}},
+	})
+
+	if errno := fs.Chown(context.Background(), "f.txt", 5000, 9999); errno != 0 {
+		t.Fatalf("Chown mixed: errno = %v", errno)
+	}
+	got, ok := client.owners["/workspace/f.txt"]
+	if !ok {
+		t.Fatalf("mixed chown should forward to backend")
+	}
+	if got != [2]int{0, 7} {
+		t.Fatalf("chown forwarded as %v, want [0 7]", got)
+	}
+}
+
 func TestAccessTransparentRejectsForeignUser(t *testing.T) {
 	client := &fakeSFTPClient{}
 	fs := New(client, "/workspace", nil, &Options{

@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/user"
 	"path"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -28,6 +30,98 @@ func validateUIDGIDMode(name, value string) error {
 	default:
 		return fmt.Errorf("%s must be one of %s, %s; got %q", name, UIDGIDModeTransparent, UIDGIDModeOverride, value)
 	}
+}
+
+// IDMapEntry is a parsed uid_map/gid_map line. A single entry maps a
+// contiguous range of [Count] remote IDs starting at RemoteID to local
+// IDs starting at LocalID.
+type IDMapEntry struct {
+	RemoteID uint32
+	LocalID  uint32
+	Count    uint32
+}
+
+// IDLookup resolves a name to a numeric ID. LookupUID and LookupGroupGID
+// are the production implementations used by Validate; tests can pass an
+// in-memory stub.
+type IDLookup func(name string) (uint32, error)
+
+// LookupUID resolves a local username to its UID.
+func LookupUID(name string) (uint32, error) {
+	u, err := user.Lookup(name)
+	if err != nil {
+		return 0, err
+	}
+	id, err := strconv.ParseUint(u.Uid, 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("parse uid %q: %w", u.Uid, err)
+	}
+	return uint32(id), nil
+}
+
+// LookupGroupGID resolves a local group name to its GID.
+func LookupGroupGID(name string) (uint32, error) {
+	g, err := user.LookupGroup(name)
+	if err != nil {
+		return 0, err
+	}
+	id, err := strconv.ParseUint(g.Gid, 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("parse gid %q: %w", g.Gid, err)
+	}
+	return uint32(id), nil
+}
+
+// CompileIDMapEntry parses a single uid_map / gid_map entry in
+// /etc/subuid-like format. Supported forms:
+//
+//	uid:mapped_uid
+//	username:mapped_uid
+//	uid:mapped_uid:count
+//	username:mapped_uid:count
+//
+// The first column identifies the remote-side ID (either as a numeric
+// ID or as a name resolved via lookup); the second column is the local
+// ID to surface for that range; count (default 1) extends the range.
+// lookup may be nil when every entry uses a numeric first column.
+func CompileIDMapEntry(s string, lookup IDLookup) (IDMapEntry, error) {
+	if s == "" {
+		return IDMapEntry{}, errors.New("entry must not be empty")
+	}
+	parts := strings.Split(s, ":")
+	if len(parts) < 2 || len(parts) > 3 {
+		return IDMapEntry{}, fmt.Errorf("entry %q: expected 2 or 3 colon-separated fields, got %d", s, len(parts))
+	}
+	var entry IDMapEntry
+	if id, err := strconv.ParseUint(parts[0], 10, 32); err == nil {
+		entry.RemoteID = uint32(id)
+	} else {
+		if lookup == nil {
+			return IDMapEntry{}, fmt.Errorf("entry %q: first field %q is not numeric and no name lookup is configured", s, parts[0])
+		}
+		id, lerr := lookup(parts[0])
+		if lerr != nil {
+			return IDMapEntry{}, fmt.Errorf("entry %q: resolve %q: %w", s, parts[0], lerr)
+		}
+		entry.RemoteID = id
+	}
+	mapped, err := strconv.ParseUint(parts[1], 10, 32)
+	if err != nil {
+		return IDMapEntry{}, fmt.Errorf("entry %q: mapped id %q is not a valid uint32: %w", s, parts[1], err)
+	}
+	entry.LocalID = uint32(mapped)
+	entry.Count = 1
+	if len(parts) == 3 {
+		count, err := strconv.ParseUint(parts[2], 10, 32)
+		if err != nil {
+			return IDMapEntry{}, fmt.Errorf("entry %q: count %q is not a valid uint32: %w", s, parts[2], err)
+		}
+		if count == 0 {
+			return IDMapEntry{}, fmt.Errorf("entry %q: count must be > 0", s)
+		}
+		entry.Count = uint32(count)
+	}
+	return entry, nil
 }
 
 // Mount represents a parsed container mount entry in docker-compose style.
@@ -169,6 +263,20 @@ type Config struct {
 		UIDMode string `yaml:"uid_mode" toml:"uid_mode" json:"uid_mode"`
 		// GIDMode is the GID counterpart to UIDMode; same semantics.
 		GIDMode string `yaml:"gid_mode" toml:"gid_mode" json:"gid_mode"`
+		// UIDMap is a list of /etc/subuid-like entries that translate
+		// remote-reported UIDs to the local view (and back, on chown).
+		// Each entry has one of these shapes:
+		//   "uid:mapped_uid"
+		//   "username:mapped_uid"          (username resolved via getpwnam)
+		//   "uid:mapped_uid:count"
+		//   "username:mapped_uid:count"
+		// A UID covered by any entry takes the mapped value regardless
+		// of UIDMode; UIDs not covered fall back to UIDMode behaviour.
+		// See CompileIDMapEntry for the full grammar.
+		UIDMap []string `yaml:"uid_map" toml:"uid_map" json:"uid_map"`
+		// GIDMap is the GID counterpart to UIDMap. Names in the first
+		// field are resolved via getgrnam instead of getpwnam.
+		GIDMap []string `yaml:"gid_map" toml:"gid_map" json:"gid_map"`
 	} `yaml:"container" toml:"container" json:"container"`
 
 	Agent struct {
@@ -343,6 +451,16 @@ func (c *Config) Validate() error {
 	}
 	if err := validateUIDGIDMode("container.gid_mode", c.Container.GIDMode); err != nil {
 		return err
+	}
+	for _, e := range c.Container.UIDMap {
+		if _, err := CompileIDMapEntry(e, LookupUID); err != nil {
+			return fmt.Errorf("container.uid_map: %w", err)
+		}
+	}
+	for _, e := range c.Container.GIDMap {
+		if _, err := CompileIDMapEntry(e, LookupGroupGID); err != nil {
+			return fmt.Errorf("container.gid_map: %w", err)
+		}
 	}
 	if !filepath.IsAbs(c.Container.PathStubDir) {
 		return fmt.Errorf("container.path_stub_dir must be absolute; got %q", c.Container.PathStubDir)

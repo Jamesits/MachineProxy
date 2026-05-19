@@ -34,18 +34,35 @@ const (
 	IDModeOverride IDMode = "override"
 )
 
+// IDMapEntry describes one contiguous translation between the remote
+// and local UID/GID spaces. A UID/GID r matches when
+// RemoteID <= r < RemoteID+Count, and is reported locally as
+// LocalID + (r - RemoteID). The reverse mapping is used to translate
+// chown values from the local view back to the remote backend.
+type IDMapEntry struct {
+	RemoteID uint32
+	LocalID  uint32
+	Count    uint32
+}
+
 // Options configures FileSystem behaviour that is not derivable from
 // the remote.FileClient alone.
 type Options struct {
-	// UIDMode selects the read/chown UID translation mode. Empty value
-	// defaults to IDModeOverride.
+	// UIDMode selects the fallback UID translation when no UIDMap entry
+	// covers the ID being translated. Empty value defaults to
+	// IDModeOverride.
 	UIDMode IDMode
-	// GIDMode selects the read/chown GID translation mode. Empty value
-	// defaults to IDModeOverride.
+	// GIDMode is the GID counterpart to UIDMode.
 	GIDMode IDMode
-	// LocalUID is the UID to report when UIDMode == IDModeOverride.
+	// UIDMap is consulted before falling back to UIDMode. The first
+	// matching entry wins; entries are searched in order.
+	UIDMap []IDMapEntry
+	// GIDMap is the GID counterpart to UIDMap.
+	GIDMap []IDMapEntry
+	// LocalUID is the UID to report when UIDMode == IDModeOverride and
+	// no UIDMap entry matches.
 	LocalUID uint32
-	// LocalGID is the GID to report when GIDMode == IDModeOverride.
+	// LocalGID is the GID counterpart to LocalUID.
 	LocalGID uint32
 }
 
@@ -57,6 +74,8 @@ type FileSystem struct {
 	log      *slog.Logger
 	uidMode  IDMode
 	gidMode  IDMode
+	uidMap   []IDMapEntry
+	gidMap   []IDMapEntry
 	localUID uint32
 	localGID uint32
 }
@@ -87,21 +106,57 @@ func New(sftp remote.FileClient, root string, log *slog.Logger, opts *Options) *
 		if opts.GIDMode != "" {
 			fs.gidMode = opts.GIDMode
 		}
+		fs.uidMap = opts.UIDMap
+		fs.gidMap = opts.GIDMap
 		fs.localUID = opts.LocalUID
 		fs.localGID = opts.LocalGID
 	}
 	return fs
 }
 
+// mapToLocal scans entries for a range covering remote and returns the
+// translated local ID. ok=false means no entry matched.
+func mapToLocal(entries []IDMapEntry, remote uint32) (uint32, bool) {
+	for _, e := range entries {
+		if e.Count == 0 {
+			continue
+		}
+		if remote >= e.RemoteID && remote-e.RemoteID < e.Count {
+			return e.LocalID + (remote - e.RemoteID), true
+		}
+	}
+	return 0, false
+}
+
+// mapToRemote is the reverse of mapToLocal: translate a local-view ID
+// back to the remote space. Used when forwarding chown.
+func mapToRemote(entries []IDMapEntry, local uint32) (uint32, bool) {
+	for _, e := range entries {
+		if e.Count == 0 {
+			continue
+		}
+		if local >= e.LocalID && local-e.LocalID < e.Count {
+			return e.RemoteID + (local - e.LocalID), true
+		}
+	}
+	return 0, false
+}
+
 // applyAttr fills out from st and applies the configured uid/gid
-// override. All FUSE attr-emitting paths funnel through this helper so
-// the override is enforced in exactly one place.
+// mapping. All FUSE attr-emitting paths funnel through this helper so
+// the translation is enforced in exactly one place. UIDMap/GIDMap take
+// precedence over UIDMode/GIDMode; the mode only governs IDs that no
+// map entry covers.
 func (f *FileSystem) applyAttr(out *fuse.Attr, st os.FileInfo) {
 	applyFileInfo(out, st)
-	if f.uidMode == IDModeOverride {
+	if mapped, ok := mapToLocal(f.uidMap, out.Uid); ok {
+		out.Uid = mapped
+	} else if f.uidMode == IDModeOverride {
 		out.Uid = f.localUID
 	}
-	if f.gidMode == IDModeOverride {
+	if mapped, ok := mapToLocal(f.gidMap, out.Gid); ok {
+		out.Gid = mapped
+	} else if f.gidMode == IDModeOverride {
 		out.Gid = f.localGID
 	}
 }
@@ -110,18 +165,26 @@ func (f *FileSystem) applyAttr(out *fuse.Attr, st os.FileInfo) {
 // the current mapping. Used by the in-process permission check (which
 // must agree with what the kernel will see via default_permissions).
 func (f *FileSystem) viewUID(sys any) uint32 {
+	remote := currentUID(sys)
+	if mapped, ok := mapToLocal(f.uidMap, remote); ok {
+		return mapped
+	}
 	if f.uidMode == IDModeOverride {
 		return f.localUID
 	}
-	return currentUID(sys)
+	return remote
 }
 
 // viewGID is the GID counterpart to viewUID.
 func (f *FileSystem) viewGID(sys any) uint32 {
+	remote := currentGID(sys)
+	if mapped, ok := mapToLocal(f.gidMap, remote); ok {
+		return mapped
+	}
 	if f.gidMode == IDModeOverride {
 		return f.localGID
 	}
-	return currentGID(sys)
+	return remote
 }
 
 func (f *FileSystem) ReadFile(ctx context.Context, rel string, off int64, size int) ([]byte, syscall.Errno) {
@@ -308,33 +371,67 @@ func (f *FileSystem) Chmod(ctx context.Context, rel string, mode os.FileMode) sy
 
 func (f *FileSystem) Chown(ctx context.Context, rel string, uid, gid uint32) syscall.Errno {
 	f.log.Log(ctx, logging.LevelTrace, "fuse chown", "path", rel, "uid", uid, "gid", gid)
-	// In override mode the local view of ownership is fabricated, so
-	// any chown the caller issues based on that fake view would, if
-	// forwarded, clobber the real remote ownership. Drop the dimension
-	// that the user opted out of and forward only what remains.
-	uidOverride := f.uidMode == IDModeOverride
-	gidOverride := f.gidMode == IDModeOverride
-	if uidOverride && gidOverride {
-		f.log.Debug("fuse chown: both uid and gid overridden, no-op", "path", rel, "uid", uid, "gid", gid)
+	// For each dimension, decide which remote value (if any) to forward.
+	// Map hit  → translate local → remote and forward the mapped value.
+	// Override → preserve the remote-side ownership (no-op for this
+	//            dimension; the local view was fabricated).
+	// Transparent → forward the user-supplied value verbatim.
+	finalUID, uidAction := f.resolveChownUID(uid)
+	finalGID, gidAction := f.resolveChownGID(gid)
+	if uidAction == chownNoop && gidAction == chownNoop {
+		f.log.Debug("fuse chown: both dimensions are no-op", "path", rel, "uid", uid, "gid", gid)
 		return 0
 	}
-	if uidOverride || gidOverride {
+	if uidAction == chownNoop || gidAction == chownNoop {
 		st, errno := f.Stat(ctx, rel)
 		if errno != 0 {
 			return errno
 		}
-		if uidOverride {
-			uid = currentUID(st.Sys())
+		if uidAction == chownNoop {
+			finalUID = currentUID(st.Sys())
 		}
-		if gidOverride {
-			gid = currentGID(st.Sys())
+		if gidAction == chownNoop {
+			finalGID = currentGID(st.Sys())
 		}
 	}
-	if err := f.sftp.Chown(f.absPath(rel), int(uid), int(gid)); err != nil {
-		f.log.Warn("fuse chown failed", "path", rel, "uid", uid, "gid", gid, "error", err)
+	if err := f.sftp.Chown(f.absPath(rel), int(finalUID), int(finalGID)); err != nil {
+		f.log.Warn("fuse chown failed", "path", rel, "uid", finalUID, "gid", finalGID, "error", err)
 		return toErrno(err)
 	}
 	return 0
+}
+
+// chownDecision selects how a single dimension of a chown call should
+// be forwarded to the remote backend.
+type chownDecision int
+
+const (
+	// chownForward sends the user-supplied (or mapped) value through to
+	// the backend.
+	chownForward chownDecision = iota
+	// chownNoop preserves the remote-side ID; the caller fills in the
+	// current remote value from a fresh Stat before issuing the chown.
+	chownNoop
+)
+
+func (f *FileSystem) resolveChownUID(uid uint32) (uint32, chownDecision) {
+	if mapped, ok := mapToRemote(f.uidMap, uid); ok {
+		return mapped, chownForward
+	}
+	if f.uidMode == IDModeOverride {
+		return 0, chownNoop
+	}
+	return uid, chownForward
+}
+
+func (f *FileSystem) resolveChownGID(gid uint32) (uint32, chownDecision) {
+	if mapped, ok := mapToRemote(f.gidMap, gid); ok {
+		return mapped, chownForward
+	}
+	if f.gidMode == IDModeOverride {
+		return 0, chownNoop
+	}
+	return gid, chownForward
 }
 
 func (f *FileSystem) Chtimes(ctx context.Context, rel string, atime, mtime time.Time) syscall.Errno {

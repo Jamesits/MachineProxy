@@ -112,6 +112,27 @@ env_remove = [
 # uid_mode = "override"
 # gid_mode = "override"
 
+# Fine-grained ID translation, applied before falling back to
+# uid_mode/gid_mode. Each line is parsed in /etc/subuid style:
+#   "uid:mapped_uid"              — translate one remote uid to one local uid
+#   "username:mapped_uid"         — same, with the remote uid resolved by
+#                                   looking up "username" in the local
+#                                   passwd database (getpwnam)
+#   "uid:mapped_uid:count"        — translate a range of count consecutive
+#                                   uids: remote uid+i → mapped_uid+i
+#   "username:mapped_uid:count"   — same range form with name resolution
+# Any uid covered by an entry takes the mapped value; uids outside every
+# range fall back to uid_mode. gid_map works identically, except names in
+# the first column resolve via getgrnam.
+# uid_map = [
+#     "0:1000",        # remote root → local user
+#     "1000:1000:100", # range: remote 1000..1099 → local 1000..1099
+#     "alice:2000",    # remote uid of local "alice" → 2000
+# ]
+# gid_map = [
+#     "0:1000",
+# ]
+
 # [agent]
 
 # Agent env filtering controls which variables are forwarded to the remote.
