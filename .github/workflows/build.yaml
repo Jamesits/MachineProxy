@@ -78,7 +78,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Download deb packages
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: machineproxy-deb
           path: dist
