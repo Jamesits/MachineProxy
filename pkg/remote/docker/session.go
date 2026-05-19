@@ -10,9 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/client"
-	"github.com/docker/docker/pkg/stdcopy"
+	"github.com/moby/moby/api/pkg/stdcopy"
+	"github.com/moby/moby/client"
 
 	"github.com/jamesits/machineproxy/pkg/remote"
 )
@@ -96,11 +95,11 @@ func (s *dockerSession) Start(cmdline string) error {
 	}
 	s.started = true
 
-	created, err := s.cli.ContainerExecCreate(s.bgCtx, s.containerID, container.ExecOptions{
+	created, err := s.cli.ExecCreate(s.bgCtx, s.containerID, client.ExecCreateOptions{
 		AttachStdin:  true,
 		AttachStdout: true,
 		AttachStderr: true,
-		Tty:          false,
+		TTY:          false,
 		Env:          s.env,
 		Cmd:          []string{"sh", "-c", cmdline},
 	})
@@ -110,7 +109,7 @@ func (s *dockerSession) Start(cmdline string) error {
 	}
 	s.execID = created.ID
 
-	attach, err := s.cli.ContainerExecAttach(s.bgCtx, s.execID, container.ExecAttachOptions{Tty: false})
+	attach, err := s.cli.ExecAttach(s.bgCtx, s.execID, client.ExecAttachOptions{TTY: false})
 	if err != nil {
 		s.closePipes()
 		return fmt.Errorf("docker exec attach: %w", err)
@@ -142,7 +141,7 @@ func (s *dockerSession) markDone(copyErr error) {
 	deadline := time.Now().Add(5 * time.Second)
 	var inspectErr error
 	for time.Now().Before(deadline) {
-		insp, err := s.cli.ContainerExecInspect(s.bgCtx, s.execID)
+		insp, err := s.cli.ExecInspect(s.bgCtx, s.execID, client.ExecInspectOptions{})
 		if err != nil {
 			inspectErr = err
 			time.Sleep(20 * time.Millisecond)

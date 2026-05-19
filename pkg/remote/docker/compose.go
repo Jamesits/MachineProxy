@@ -12,9 +12,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/client"
 	"gopkg.in/yaml.v3"
 
 	"github.com/jamesits/machineproxy/pkg/logging"
@@ -68,29 +66,28 @@ func normalizeProjectName(s string) string {
 // label (1-based, matching Docker Compose convention). When sequence == 0
 // and multiple containers match, it returns an error with a hint.
 func ResolveComposeService(ctx context.Context, cli *client.Client, project, service string, sequence int) (string, error) {
-	args := filters.NewArgs(
-		filters.Arg("label", "com.docker.compose.project="+project),
-		filters.Arg("label", "com.docker.compose.service="+service),
-		filters.Arg("status", "running"),
-	)
+	args := make(client.Filters).
+		Add("label", "com.docker.compose.project="+project).
+		Add("label", "com.docker.compose.service="+service).
+		Add("status", "running")
 	if sequence > 0 {
 		args.Add("label", fmt.Sprintf("com.docker.compose.container-number=%d", sequence))
 	}
 
-	containers, err := cli.ContainerList(ctx, container.ListOptions{Filters: args})
+	result, err := cli.ContainerList(ctx, client.ContainerListOptions{Filters: args})
 	if err != nil {
 		return "", fmt.Errorf("compose: list containers for %s/%s: %w", project, service, err)
 	}
-	if len(containers) == 0 {
+	if len(result.Items) == 0 {
 		return "", fmt.Errorf("compose: no running container for %s/%s", project, service)
 	}
-	if len(containers) > 1 {
+	if len(result.Items) > 1 {
 		return "", fmt.Errorf(
 			"compose: %d running containers match %s/%s; use compose://%s/%s/<n> to select a specific replica",
-			len(containers), project, service, project, service,
+			len(result.Items), project, service, project, service,
 		)
 	}
-	return containers[0].ID, nil
+	return result.Items[0].ID, nil
 }
 
 // NewFromCompose creates a Docker backend after resolving the given Compose

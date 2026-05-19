@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/client"
 
 	"github.com/jamesits/machineproxy/pkg/logging"
 	"github.com/jamesits/machineproxy/pkg/remote"
@@ -90,32 +90,32 @@ func (b *Backend) SendKeepAlive(ctx context.Context) error { return nil }
 // Start verifies that the docker daemon is reachable and the target
 // container is running.
 func (b *Backend) Start(ctx context.Context) error {
-	if _, err := b.cli.Ping(ctx); err != nil {
+	if _, err := b.cli.Ping(ctx, client.PingOptions{}); err != nil {
 		b.mu.Lock()
 		b.lastErr = err
 		b.mu.Unlock()
 		return fmt.Errorf("docker ping: %w", err)
 	}
-	insp, err := b.cli.ContainerInspect(ctx, b.cfg.Container)
+	insp, err := b.cli.ContainerInspect(ctx, b.cfg.Container, client.ContainerInspectOptions{})
 	if err != nil {
 		b.mu.Lock()
 		b.lastErr = err
 		b.mu.Unlock()
 		return fmt.Errorf("docker inspect %q: %w", b.cfg.Container, err)
 	}
-	if insp.State == nil || !insp.State.Running {
-		err := fmt.Errorf("container %q is not running (state=%v)", b.cfg.Container, stateString(insp.State))
+	if insp.Container.State == nil || !insp.Container.State.Running {
+		err := fmt.Errorf("container %q is not running (state=%v)", b.cfg.Container, stateString(insp.Container.State))
 		b.mu.Lock()
 		b.lastErr = err
 		b.mu.Unlock()
 		return err
 	}
 	b.mu.Lock()
-	b.containerID = insp.ID
+	b.containerID = insp.Container.ID
 	b.connected = true
 	b.lastErr = nil
 	b.mu.Unlock()
-	b.log.Debug("docker backend connected", "container", b.cfg.Container, "id", insp.ID[:12])
+	b.log.Debug("docker backend connected", "container", b.cfg.Container, "id", insp.Container.ID[:12])
 	return nil
 }
 
@@ -184,13 +184,13 @@ func (b *Backend) Files(ctx context.Context) (remote.FileClient, error) {
 // ARM architectures carry one and only when the kernel reports it
 // (e.g. "armv7l").
 func (b *Backend) DetectPlatform(ctx context.Context) (remote.PlatformInfo, error) {
-	info, err := b.cli.Info(ctx)
+	infoResult, err := b.cli.Info(ctx, client.InfoOptions{})
 	if err != nil {
 		return remote.PlatformInfo{}, fmt.Errorf("docker info: %w", err)
 	}
-	out := platformFromInfo(info.OSType, info.Architecture)
+	out := platformFromInfo(infoResult.Info.OSType, infoResult.Info.Architecture)
 	if out.OS == "" && out.Arch == "" {
-		return out, fmt.Errorf("docker info did not yield a usable platform (ostype=%q arch=%q)", info.OSType, info.Architecture)
+		return out, fmt.Errorf("docker info did not yield a usable platform (ostype=%q arch=%q)", infoResult.Info.OSType, infoResult.Info.Architecture)
 	}
 	return out, nil
 }

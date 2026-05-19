@@ -12,8 +12,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/client"
 )
 
 // copyFileToContainer writes a single file into the container at dst
@@ -56,7 +55,11 @@ func copyFileToContainer(ctx context.Context, cli *client.Client, containerID, l
 		return fmt.Errorf("tar close: %w", err)
 	}
 
-	return cli.CopyToContainer(ctx, containerID, parent, buf, container.CopyToContainerOptions{})
+	_, err = cli.CopyToContainer(ctx, containerID, client.CopyToContainerOptions{
+		DestinationPath: parent,
+		Content:         buf,
+	})
+	return err
 }
 
 // mkdirInContainer creates dir (recursively) inside the container by
@@ -64,7 +67,7 @@ func copyFileToContainer(ctx context.Context, cli *client.Client, containerID, l
 // rather than the docker archive API because the latter has no
 // "create parents" mode.
 func mkdirInContainer(ctx context.Context, cli *client.Client, containerID, dir string) error {
-	created, err := cli.ContainerExecCreate(ctx, containerID, container.ExecOptions{
+	created, err := cli.ExecCreate(ctx, containerID, client.ExecCreateOptions{
 		AttachStdout: true,
 		AttachStderr: true,
 		Cmd:          []string{"mkdir", "-p", dir},
@@ -72,7 +75,7 @@ func mkdirInContainer(ctx context.Context, cli *client.Client, containerID, dir 
 	if err != nil {
 		return err
 	}
-	resp, err := cli.ContainerExecAttach(ctx, created.ID, container.ExecAttachOptions{})
+	resp, err := cli.ExecAttach(ctx, created.ID, client.ExecAttachOptions{})
 	if err != nil {
 		return err
 	}
@@ -81,7 +84,7 @@ func mkdirInContainer(ctx context.Context, cli *client.Client, containerID, dir 
 	// it fails — keep it for the error path.
 	var combined strings.Builder
 	_, _ = io.Copy(&combined, resp.Reader)
-	insp, err := cli.ContainerExecInspect(ctx, created.ID)
+	insp, err := cli.ExecInspect(ctx, created.ID, client.ExecInspectOptions{})
 	if err != nil {
 		return err
 	}
