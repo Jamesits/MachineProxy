@@ -94,11 +94,14 @@ archives:
       # darwin-only DYLD interposer dylib produced by darwin/interposer/build.sh.
       # The script writes outside dist/ so its output survives goreleaser's
       # distribution-directory cleanup; we map the per-arch tree into the
-      # archive at the standard agent/darwin/<arch>/ layout.
-      - src: darwin/interposer/build/arm64/libmproxy_interposer.dylib
-        dst: agent/darwin/arm64/libmproxy_interposer.dylib
-      - src: darwin/interposer/build/amd64/libmproxy_interposer.dylib
-        dst: agent/darwin/amd64/libmproxy_interposer.dylib
+      # archive at the standard agent/darwin/<arch>/ layout. Glob (rather
+      # than exact-path) src is deliberate: build.sh no-ops on non-darwin
+      # hosts, so the dylib is absent on Linux CI. Goreleaser tolerates
+      # zero-match globs but errors on missing exact paths.
+      - src: darwin/interposer/build/arm64/*.dylib
+        dst: agent/darwin/arm64
+      - src: darwin/interposer/build/amd64/*.dylib
+        dst: agent/darwin/amd64
 
 nfpms:
   - id: machineproxy
