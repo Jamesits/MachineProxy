@@ -1,0 +1,268 @@
+.TH MACHINEPROXY 1 "2026-05-20" "MachineProxy" "User Commands"
+.SH NAME
+machineproxy \- run a program locally while it operates on a remote machine
+.SH SYNOPSIS
+.B machineproxy
+[\fIoptions\fR]
+[\fIDESTINATION\fR]
+[\fB\-\-\fR \fIprogram\fR [\fIargs\fR...]]
+.SH DESCRIPTION
+.B machineproxy
+creates a mixed-reality environment: the target program runs on the local
+workstation but every child process it spawns, and every file it accesses
+through the mounted workspace, is transparently forwarded to a remote machine
+over SSH or Docker.
+.PP
+The workspace directory is exposed to the target program via a FUSE/SFTP
+mount.
+Child processes are intercepted by a
+.BR ptrace (2)-based
+tracer (Linux) or a
+.B DYLD_INSERT_LIBRARIES
+interposer (macOS) and relaunched on the remote machine via
+.BR mproxy-agent .
+File-descriptor inheritance and pipes work transparently across the
+machine boundary.
+.PP
+This lets AI coding agents, editors, and other local-only tools operate on
+machines that lack Internet access, cannot run modern runtimes, or must be
+accessed from a different trust domain.
+.SH DESTINATION
+The destination selects the remote backend and target machine.
+It may be a bare hostname (implying SSH), a
+.IB user @ hostname
+pair, or a scheme-prefixed URL.
+.TP
+.I hostname
+.TQ
+.IB user @ hostname
+SSH backend.
+Equivalent to
+.BI ssh:// user @ hostname .
+.TP
+.BI ssh:// [user@] hostname [:port]
+SSH backend with explicit user and/or port.
+.TP
+.BI docker:// container
+Docker backend.
+.I container
+may be a container name or ID.
+.TP
+.BI compose:// project / service [/ id ]
+Docker Compose backend.
+Use
+.B compose://./\fIservice\fR
+to auto-detect the project from the current directory.
+.I id
+is the 1-based replica index for scaled services.
+.PP
+When no destination is given, machineproxy reads all connection details from
+the configuration file.
+.SH OPTIONS
+.TP
+.BI \-config " path"
+Path to the configuration file (TOML, YAML, or JSON format).
+Default:
+.IR /etc/machineproxy/machineproxy.toml .
+.TP
+.B \-version
+Print the version string and exit.
+.TP
+.BI \-backend " type"
+Override the remote backend type.
+Accepted values:
+.BR ssh ,
+.BR docker ,
+.BR compose .
+The destination URL scheme takes precedence when both are given.
+.TP
+.BR \-p ", " \-port " \fIport\fR"
+Remote SSH port.
+Overrides
+.B remote.ssh.port
+from the configuration file.
+Only valid with the SSH backend.
+.TP
+.BR \-l ", " \-login " \fIuser\fR"
+Remote SSH user.
+Overrides
+.B remote.ssh.user
+from the configuration file.
+Only valid with the SSH backend.
+.TP
+.BI \-arch " arch"
+Remote machine architecture (e.g.\&
+.BR amd64 ,
+.BR arm64 ).
+Used when selecting the
+.B mproxy-agent
+binary to upload.
+Overrides
+.BR remote.arch .
+.TP
+.BR \-v ", " \-mount " [\fIlocal\fR:]\fIremote\fR"
+Add a mount entry.
+If
+.I local
+is omitted the same path is used on both machines.
+Prepended before
+.B container.mounts
+from the configuration file.
+May be repeated.
+.TP
+.BR \-w ", " \-workdir " \fIdir\fR"
+Working directory inside the container.
+Overrides
+.BR container.working_dir .
+.SH CONFIGURATION
+.B machineproxy
+reads a configuration file in TOML, YAML, or JSON format (default:
+.IR /etc/machineproxy/machineproxy.toml ).
+Command-line flags override the corresponding configuration keys.
+An annotated example configuration is installed at
+.IR /usr/share/doc/machineproxy/examples/machineproxy.example.toml .
+.PP
+Key configuration sections:
+.TP
+.B [remote]
+Backend type, SSH host/user/port, Docker container, Compose project/service,
+and target OS/architecture.
+.TP
+.B [container]
+Local commands whitelist
+.RB ( local_commands ),
+workspace mounts, working directory, environment variable filtering,
+path-proxy mode, and file ownership translation.
+.TP
+.B [agent]
+Environment variable filtering for the remote side.
+.TP
+.B [components]
+Explicit paths to helper binaries
+.RB ( mproxy-shim ,
+.BR mproxy-tracer ,
+.BR mproxy-agent ).
+Auto-discovered from
+.I /usr/lib/machineproxy/
+when omitted.
+.TP
+.B [recording]
+Optional session recording in MachineProxy wire format.
+.SH EXIT STATUS
+.B machineproxy
+exits with the exit code of the child
+.IR program .
+It exits with status
+.B 1
+if it encounters a fatal error before the program can start, printing a
+diagnostic to standard error.
+.SH ENVIRONMENT
+.TP
+.B MPROXY_*
+Consumed internally by MachineProxy components.
+Filtered from the container process by default.
+.TP
+.BR DOCKER_HOST ", " DOCKER_API_VERSION ", " DOCKER_TLS_VERIFY ", " DOCKER_CERT_PATH
+Standard Docker client variables honored by the Docker and Compose backends.
+.TP
+.B DYLD_INSERT_LIBRARIES
+Set by machineproxy on macOS to inject the exec-interposer library.
+Stripped by system binaries compiled with the hardened runtime.
+.SH FILES
+.TP
+.I /etc/machineproxy/machineproxy.toml
+Default configuration file.
+.TP
+.I /usr/lib/machineproxy/mproxy-shim
+Local shim that relays child process stdio to the remote agent.
+.TP
+.I /usr/lib/machineproxy/mproxy-tracer
+.BR ptrace (2)-based
+exec interceptor (Linux only).
+.TP
+.I /usr/lib/machineproxy/agent/\fIos\fR/\fIarch\fR/mproxy-agent
+Remote agent binary, copied to the target machine at startup.
+.TP
+.I /usr/share/doc/machineproxy/examples/machineproxy.example.toml
+Annotated configuration example.
+.SH NOTES
+.SS Linux Requirements
+.B bubblewrap
+and
+.B fuse
+must be installed.
+On systems where unprivileged user namespaces are restricted (e.g.\&
+Ubuntu with AppArmor), enable them:
+.PP
+.RS
+.EX
+echo "kernel.apparmor_restrict_unprivileged_userns=0" \\
+    | sudo tee /etc/sysctl.d/80-machineproxy.conf
+sudo sysctl -p /etc/sysctl.d/80-machineproxy.conf
+.EE
+.RE
+.SS macOS Requirements
+Install
+.B macFUSE
+(\fBbrew install \-\-cask macfuse\fR).
+Most
+.I /usr/bin
+binaries are hardened and ignore
+.BR DYLD_INSERT_LIBRARIES ;
+they always run locally.
+Install Homebrew equivalents for tools that must be forwarded to the remote.
+.SS Security
+Do not treat
+.B machineproxy
+as a security boundary.
+The target program can execute commands on both the local and remote machines.
+Only run programs you trust.
+.SH EXAMPLES
+Run
+.B bash
+with the current directory mirrored to a remote host:
+.PP
+.RS
+.EX
+cd /path/to/workspace
+machineproxy remote.host \-\- bash
+.EE
+.RE
+.PP
+Use a non-default SSH port and user:
+.PP
+.RS
+.EX
+machineproxy \-p 2222 \-l admin remote.host \-\- bash
+.EE
+.RE
+.PP
+Attach to a Docker container, mapping a local directory:
+.PP
+.RS
+.EX
+machineproxy \-v "$(pwd):/workspace" docker://my-dev-box \-\- bash
+.EE
+.RE
+.PP
+Attach to a Docker Compose service in the current project:
+.PP
+.RS
+.EX
+machineproxy compose://./dev \-\- bash
+.EE
+.RE
+.SH SEE ALSO
+.BR ssh (1),
+.BR docker (1),
+.BR bwrap (1),
+.BR fuse (8)
+.SH AUTHORS
+Jamesits <osscontrib@ciexyz.net>
+.SH LICENSE
+MIT License.
+See
+.I /usr/share/doc/machineproxy/LICENSE
+or
+.UR https://github.com/Jamesits/MachineProxy
+.UE .

@@ -133,6 +133,8 @@ nfpms:
       - src: config/machineproxy.default.toml
         dst: /etc/machineproxy/machineproxy.toml
         type: "config|noreplace"
+      - src: docs/machineproxy.1
+        dst: /usr/share/man/man1/machineproxy.1
 
 checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
