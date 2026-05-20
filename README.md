@@ -156,18 +156,6 @@ DO NOT treat MachineProxy as a security barrier. Programs launched by MachinePro
 
 - DO NOT mount over your local home directory, otherwise your AI agents might not be able to read their config.
 
-### Environment Variables Filtering
-
-- DO NOT filter `MPROXY_*` in `container.env_remove`
-
-### VSCode Terminal
-
-VSCode Terminal seems to override `/usr/bin/env node` in some cases, causing some programs, such as [Amp](https://ampcode.com), to fail to launch. If you are using MachineProxy from a VSCode Terminal, run Node.js programs like this, using `amp` as an example:
-
-```shell
-machineproxy [other args] /usr/bin/node "$(which amp)" --no-ide
-```
-
 ### Pipe Performance
 
 If the process setting up the pipe runs locally, and both the pipe sender and the receiver runs on the remote machine, the pipe goes through the SSH connection twice.
