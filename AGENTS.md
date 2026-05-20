@@ -14,6 +14,7 @@ Run a program locally while it accesses files and executes commands on a remote 
 - Keep `cmd/*` lean, organize features into packages
 - Avoid using `context.Background()`, `context.TODO()` or `nil` context in packages, use the context from caller
 - Every command line argument must have its counterpart in the config; after modifying the config structure, `config/*.example.toml` must be updated too
+- Use `log/slog` for logging; always pass the logger from upstream to downstream, never use your own logger in the package; if logged arguments contain slices, wrap it with `logging.JSONValue` to keep spaces visible
 - Run `go vet -tags backend_docker,backend_ssh ./...` (must be run in `GOOS`/`GOARCH` matrix), `golangci-lint run` and `go fmt ./...` after code change
 
 ## Compilation

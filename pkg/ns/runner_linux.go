@@ -49,7 +49,7 @@ func (n *Namespace) Run(ctx context.Context, workingDir string, cmdline []string
 	args := buildBwrapArgs(workingDir, cmdline, binds)
 
 	n.log.Debug("running in namespace", "bwrap", n.bwrapBin, "binds", len(binds))
-	n.log.Log(ctx, logging.LevelTrace, "bwrap full args", "args", args)
+	n.log.Log(ctx, logging.LevelTrace, "bwrap full args", "args", logging.JSONValue(args))
 
 	cmd := exec.CommandContext(ctx, n.bwrapBin, args...)
 	cmd.Stdin = os.Stdin

@@ -159,7 +159,7 @@ func (r *AgentRunner) RunWithControl(ctx context.Context, req Request, ctrl *Con
 		}
 	}
 
-	log.Log(ctx, logging.LevelTrace, "sending exec frame (with control)", "path", req.Path, "argv", req.Argv, "extra_fds", req.ExtraFDs)
+	log.Log(ctx, logging.LevelTrace, "sending exec frame (with control)", "path", req.Path, "argv", logging.JSONValue(req.Argv), "extra_fds", logging.JSONValue(req.ExtraFDs))
 	if err := mux.Send(&agentproto.Frame{
 		Type: agentproto.FrameExec,
 		Exec: execMsg,
@@ -304,7 +304,7 @@ func (r *AgentRunner) EnumeratePaths(ctx context.Context, paths []string) ([]age
 		}
 	}
 
-	log.Log(ctx, logging.LevelTrace, "sending path-query frame", "paths", paths)
+	log.Log(ctx, logging.LevelTrace, "sending path-query frame", "paths", logging.JSONValue(paths))
 	if err := mux.Send(&agentproto.Frame{
 		Type:  agentproto.FramePathQuery,
 		Query: &agentproto.PathQuery{Paths: paths},

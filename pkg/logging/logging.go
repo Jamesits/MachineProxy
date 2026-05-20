@@ -1,10 +1,18 @@
 package logging
 
 import (
+	"encoding/json"
 	"io"
 	"log/slog"
 	"strings"
 )
+
+// JSONValue serializes v to a compact JSON string for use as a slog value.
+// Errors are silently discarded; v must be JSON-marshalable.
+func JSONValue(v any) string {
+	b, _ := json.Marshal(v)
+	return string(b)
+}
 
 // LevelTrace is a custom level below Debug for high-volume diagnostics
 // such as every command execution and connection keepalive.
