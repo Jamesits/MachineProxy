@@ -1,7 +1,7 @@
 # This default config covers common usages only.
 # See /usr/share/doc/machineproxy/examples/machineproxy.example.toml for a full config.
 
-log_level = "error"
+log_level = "warn"
 log_file = "" # empty means stderr
 
 [container]
