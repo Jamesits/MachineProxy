@@ -8,8 +8,12 @@ log_file = "" # empty means stderr
 # A list of programs that you want to run locally (or that you cannot install on the remote device)
 local_commands = [
     "amp",
-    "codex",
     "claude",
+    "cline",
+    "cn",
+    "codex",
+    "copilot",
+    "gemini",
     "opencode",
     "qpdf",
     "rtk",
