@@ -465,20 +465,106 @@ func (c *Config) Validate() error {
 	if !filepath.IsAbs(c.Container.PathStubDir) {
 		return fmt.Errorf("container.path_stub_dir must be absolute; got %q", c.Container.PathStubDir)
 	}
+	c.warnMountOverlaps()
 	return nil
 }
 
+// warnMountOverlaps emits a warning for every container mount that
+// shadows either the remote agent binary (mount.RemotePath is an
+// ancestor of c.Components.AgentRemotePath) or the local PATH-stub bind
+// target (mount.ContainerPath is an ancestor of c.Container.PathStubDir).
+// Both cases cause agent launch to fail, but we warn rather than reject
+// so packagers and tests can still drive unusual layouts intentionally.
+//
+// Path forms are compared only when compatible: both "~/..." or both
+// absolute. Mixed-form pairs are skipped because we cannot resolve the
+// remote home directory at config-validate time.
+func (c *Config) warnMountOverlaps() {
+	log := slog.Default()
+	agentRemote := c.Components.AgentRemotePath
+	pathStub := c.Container.PathStubDir
+	for _, raw := range c.Container.Mounts {
+		m, err := ParseMount(raw)
+		if err != nil {
+			// Validate has already reported parse errors.
+			continue
+		}
+		if isPosixAncestor(m.RemotePath, agentRemote) {
+			log.Warn(
+				"container mount covers the remote agent path; mproxy-agent launch will fail",
+				"mount", raw,
+				"mount_remote", m.RemotePath,
+				"agent_remote_path", agentRemote,
+			)
+		}
+		if isLocalAncestor(m.ContainerPath, pathStub) {
+			log.Warn(
+				"container mount covers the PATH-stub bind target; container setup will fail",
+				"mount", raw,
+				"mount_container", m.ContainerPath,
+				"path_stub_dir", pathStub,
+			)
+		}
+	}
+}
+
+// isPosixAncestor reports whether ancestor is an ancestor of (or equal
+// to) p when both are interpreted as POSIX-style paths. Returns false
+// when the two paths use incompatible forms (one absolute, one "~/...").
+func isPosixAncestor(ancestor, p string) bool {
+	if ancestor == "" || p == "" {
+		return false
+	}
+	if homePrefix(ancestor) != homePrefix(p) {
+		return false
+	}
+	ancestor = path.Clean(ancestor)
+	p = path.Clean(p)
+	if ancestor == p {
+		return true
+	}
+	return strings.HasPrefix(p, ancestor+"/")
+}
+
+// isLocalAncestor is the host-filesystem counterpart of isPosixAncestor.
+// Both paths must already be absolute in the local OS path style.
+func isLocalAncestor(ancestor, p string) bool {
+	if ancestor == "" || p == "" {
+		return false
+	}
+	if !filepath.IsAbs(ancestor) || !filepath.IsAbs(p) {
+		return false
+	}
+	ancestor = filepath.Clean(ancestor)
+	p = filepath.Clean(p)
+	if ancestor == p {
+		return true
+	}
+	return strings.HasPrefix(p, ancestor+string(filepath.Separator))
+}
+
+// homePrefix returns "~" when p is home-relative ("~" or "~/...") and
+// "" when p is otherwise. Used to gate ancestor comparisons to compatible
+// path forms.
+func homePrefix(p string) string {
+	if p == "~" || strings.HasPrefix(p, "~/") {
+		return "~"
+	}
+	return ""
+}
+
 // defaultPathStubDir returns the resolved default for the PATH-stub
-// mount point. DefaultPathStubDir is expanded against the local user's
-// home; if that lookup fails we emit a warning and fall back to
-// DefaultPathStubFallbackDir so bwrap can still mkdir the bind target.
+// mount point: <local cache dir>/pathstub. If the local cache dir
+// cannot be resolved (typically because the home directory lookup
+// fails), we emit a warning and fall back to DefaultPathStubFallbackDir
+// so bwrap can still mkdir the bind target.
 func defaultPathStubDir() string {
-	expanded, err := ExpandLocalHome(DefaultPathStubDir)
+	base, err := LocalCacheDir()
 	if err == nil {
-		return expanded
+		return filepath.Join(base, "pathstub")
 	}
 	slog.Default().Warn(
-		"could not determine local home directory; using path-stub fallback",
+		"could not resolve local cache directory; using path-stub fallback",
 		"error", err,
 		"fallback", DefaultPathStubFallbackDir,
 	)

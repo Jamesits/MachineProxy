@@ -1,7 +1,9 @@
 package config
 
 import (
+	"bytes"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -907,5 +909,152 @@ mounts = ["/workspace"]
 	}
 	if cfg.Remote.SSH.Host != "9.9.9.9" {
 		t.Fatalf("unexpected sniffed host: %q", cfg.Remote.SSH.Host)
+	}
+}
+
+func TestLocalCacheDirHonoursDefaultCacheDir(t *testing.T) {
+	prev := DefaultCacheDir
+	t.Cleanup(func() { DefaultCacheDir = prev })
+	DefaultCacheDir = "/opt/mp/cache"
+
+	got, err := LocalCacheDir()
+	if err != nil {
+		t.Fatalf("LocalCacheDir() error = %v", err)
+	}
+	if got != "/opt/mp/cache" {
+		t.Errorf("LocalCacheDir() = %q, want /opt/mp/cache", got)
+	}
+}
+
+func TestLocalCacheDirHonoursXDGCacheHome(t *testing.T) {
+	prev := DefaultCacheDir
+	t.Cleanup(func() { DefaultCacheDir = prev })
+	DefaultCacheDir = ""
+	t.Setenv("XDG_CACHE_HOME", "/var/xdg-cache")
+
+	got, err := LocalCacheDir()
+	if err != nil {
+		t.Fatalf("LocalCacheDir() error = %v", err)
+	}
+	want := filepath.Join("/var/xdg-cache", "machineproxy")
+	if got != want {
+		t.Errorf("LocalCacheDir() = %q, want %q", got, want)
+	}
+}
+
+func TestLocalCacheDirIgnoresRelativeXDG(t *testing.T) {
+	prev := DefaultCacheDir
+	t.Cleanup(func() { DefaultCacheDir = prev })
+	DefaultCacheDir = ""
+	t.Setenv("XDG_CACHE_HOME", "relative/path")
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("no home directory available: %v", err)
+	}
+	got, err := LocalCacheDir()
+	if err != nil {
+		t.Fatalf("LocalCacheDir() error = %v", err)
+	}
+	want := filepath.Join(home, ".cache/machineproxy")
+	if got != want {
+		t.Errorf("LocalCacheDir() = %q, want %q", got, want)
+	}
+}
+
+func TestPathStubDirDerivesFromCacheDir(t *testing.T) {
+	prev := DefaultCacheDir
+	t.Cleanup(func() { DefaultCacheDir = prev })
+	DefaultCacheDir = "/opt/mp/cache"
+
+	raw := `
+remote:
+  ssh:
+    host: 127.0.0.1
+container:
+  mounts:
+    - /workspace
+`
+	cfg, err := Load(strings.NewReader(raw))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	want := "/opt/mp/cache/pathstub"
+	if cfg.Container.PathStubDir != want {
+		t.Errorf("PathStubDir = %q, want %q", cfg.Container.PathStubDir, want)
+	}
+}
+
+func TestValidateWarnsOnMountCoveringAgentPath(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	raw := `
+remote:
+  ssh:
+    host: 127.0.0.1
+container:
+  path_stub_dir: /tmp/mp/stub
+  mounts:
+    - /scratch:~/.cache
+`
+	cfg, err := Load(strings.NewReader(raw))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !strings.Contains(cfg.Components.AgentRemotePath, "~/") {
+		t.Fatalf("precondition: agent path should still be tilde-prefixed, got %q", cfg.Components.AgentRemotePath)
+	}
+	if !strings.Contains(buf.String(), "remote agent path") {
+		t.Errorf("expected agent-path overlap warning, got log:\n%s", buf.String())
+	}
+}
+
+func TestValidateWarnsOnMountCoveringPathStubDir(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	raw := `
+remote:
+  ssh:
+    host: 127.0.0.1
+container:
+  path_stub_dir: /tmp/mp/stub
+  mounts:
+    - /tmp/mp:/tmp/mp
+`
+	if _, err := Load(strings.NewReader(raw)); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !strings.Contains(buf.String(), "PATH-stub bind target") {
+		t.Errorf("expected path-stub overlap warning, got log:\n%s", buf.String())
+	}
+}
+
+func TestValidateSilentOnDisjointMounts(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	raw := `
+remote:
+  ssh:
+    host: 127.0.0.1
+container:
+  path_stub_dir: /tmp/mp/stub
+  mounts:
+    - /workspace
+    - ~/projects:~/projects
+`
+	if _, err := Load(strings.NewReader(raw)); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if strings.Contains(buf.String(), "warn") || strings.Contains(buf.String(), "WARN") {
+		t.Errorf("unexpected warning for disjoint mounts:\n%s", buf.String())
 	}
 }
