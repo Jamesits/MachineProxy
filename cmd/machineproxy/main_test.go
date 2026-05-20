@@ -107,6 +107,16 @@ func TestParseCLIArgs(t *testing.T) {
 			},
 		},
 		{
+			name: "--os overrides remote os",
+			args: []string{"--os", "darwin", "host.example", "--", "uname", "-s"},
+			want: cliArgs{
+				cfgPath:     "/etc/machineproxy/machineproxy.toml",
+				destination: "host.example",
+				os:          "darwin",
+				cmd:         []string{"uname", "-s"},
+			},
+		},
+		{
 			name: "repeated -v accumulates",
 			args: []string{"-v", "/a", "-v", "/b:/c", "host", "--", "id"},
 			want: cliArgs{

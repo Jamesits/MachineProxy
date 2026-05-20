@@ -95,6 +95,9 @@ func run(rawArgs []string) error {
 		}
 		cfg.Remote.SSH.User = parsed.user
 	}
+	if parsed.os != "" {
+		cfg.Remote.OS = parsed.os
+	}
 	if parsed.arch != "" {
 		cfg.Remote.Arch = parsed.arch
 	}
@@ -201,6 +204,7 @@ type cliArgs struct {
 	destination string // raw destination string; parsed in run()
 	port        int    // 0 = unset; overrides remote.ssh.port when nonzero
 	user        string
+	os          string   // empty = unset; overrides remote.os when set
 	arch        string   // empty = unset; overrides remote.arch when set
 	mounts      []string // prepended to container.mounts (CLI first)
 	workdir     string   // empty = unset; overrides container.working_dir
@@ -260,6 +264,7 @@ func parseCLIArgs(args []string) (*cliArgs, error) {
 	const loginUsage = "remote SSH `user` (overrides remote.ssh.user; ssh-only)"
 	fs.StringVar(&loginUser, "l", "", loginUsage)
 	fs.StringVar(&loginUser, "login", "", loginUsage)
+	fs.StringVar(&out.os, "os", "", "remote machine `os` for agent binary selection (overrides remote.os)")
 	fs.StringVar(&out.arch, "arch", "", "remote machine `arch` for agent binary selection (overrides remote.arch)")
 	const mountUsage = "container mount entry in [local:]remote form (prepended to container.mounts; may be repeated)"
 	mountFlag := &repeatedString{dst: &out.mounts}

@@ -118,13 +118,14 @@ The program is launched with a quasi-remote environment.
 
 #### Local
 
-##### Linux
+<details>
+  <summary>Linux: fully works.</summary>
 
 Programs are launched inside a Bubblewrap container and traced via `ptrace` for transparent exec/file proxying. Golang runtime requires Linux 3.2 or later; [support differs on different architectures](https://go.dev/wiki/MinimumRequirements#linuxlinux). Runtime dependencies: `bubblewrap`, `fuse`.
+</details>
 
-##### macOS
-
-macOS support is highly experimental.
+<details>
+  <summary>macOS: highly experimental.</summary>
 
 Runtime dependency: [macFUSE](https://macfuse.io) (`brew install --cask macfuse`).
 
@@ -137,6 +138,7 @@ Working dir configuration is ignored: there is no bind-mount equivalent, so the 
 Whitelist semantics: the darwin interposer dylib supports exact-path and basename entries in local_commands; regex entries (`/pattern/`) fall through to the remote (limitation of the C implementation).
 
 Set the env var `MPROXY_INTERPOSER_STRIP_DYLD_ON_WHITELIST=1` to make the dylib remove DYLD_INSERT_LIBRARIES from the env passed to whitelisted commands. Useful when a whitelisted process (make, bash, etc.) spawns lots of local-only subcommands and you want those subtrees to run without the interposer. Non-whitelisted execs still chain the dylib into the child as usual.
+</details>
 
 #### Remote
 
