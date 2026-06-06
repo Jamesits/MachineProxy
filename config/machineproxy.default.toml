@@ -22,4 +22,6 @@ local_commands = [
     "rg",
 ]
 
+# These 2 options make Claude happier, but requires the same directory exists on both local and remote devices.
 auto_identity_mounts = true
+cwd_remap = "remote"
