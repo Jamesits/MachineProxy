@@ -10,6 +10,7 @@ Run a program locally while it accesses files and executes commands on a remote 
 - Containers use Bubblewrap. Use `man bwrap` to read its usage
 
 ## Code Style
+- Keep the feature parity of the tracer and the interposer
 - Use comments to document higher-level intent
 - Keep `cmd/*` lean, organize features into packages
 - Avoid using `context.Background()`, `context.TODO()` or `nil` context in packages, use the context from caller
@@ -21,6 +22,12 @@ Run a program locally while it accesses files and executes commands on a remote 
 Always perform a full rebuild with `goreleaser build --snapshot --clean`, and use the artifacts under `dist/`.
 
 ## Glossary
+### Components
+- `machineproxy`: the user-facing program that chainloads the target program
+- `mproxy-tracer`/`darwin/interposer`: syscall/libc hook for the target program
+- `mproxy-shim`: launched locally in lieu of the intended program, proxies signals and FDs to the remote side
+- `mproxy-agent`: launched at remote to wrap the intended program, proxies signals and FDs to the local side
+
 ### Environments
 - Local: The user's workstation OS. `machineproxy` runs here.
 - Container: A Bubblewrap-created mount namespace on the Local machine. The target process, `mproxy-tracer`, and `mproxy-shim` run here. The remote workspace is mounted locally via FUSE/SFTP and bind-mounted into this namespace.
