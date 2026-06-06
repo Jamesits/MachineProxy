@@ -79,7 +79,7 @@ Requirements:
 Building:
 
 ```shell
-goreleaser build --snapshot --clean
+goreleaser release --snapshot --clean
 ```
 
 ## FAQ
