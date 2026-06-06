@@ -316,6 +316,22 @@ func (d *runtimeDeps) MountWorkspace(ctx context.Context) error {
 		}
 		mount.RemotePath = resolvedRemote
 
+		// The local path (bind target) usually exists as a directory already;
+		// bwrap will create the mountpoint regardless, but a missing or
+		// non-directory path is almost always a typo worth flagging.
+		if st, lerr := os.Stat(mount.ContainerPath); lerr != nil {
+			if errors.Is(lerr, os.ErrNotExist) {
+				d.log.Warn("mount local path does not exist",
+					"local_path", mount.ContainerPath, "mount", raw)
+			} else {
+				d.log.Warn("mount local path not accessible",
+					"local_path", mount.ContainerPath, "mount", raw, "error", lerr)
+			}
+		} else if !st.IsDir() {
+			d.log.Warn("mount local path is not a directory",
+				"local_path", mount.ContainerPath, "mount", raw)
+		}
+
 		d.log.Log(ctx, logging.LevelTrace, "mounting workspace",
 			"remote_path", mount.RemotePath, "container_path", mount.ContainerPath)
 
