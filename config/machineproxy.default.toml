@@ -21,11 +21,4 @@ local_commands = [
     "rg",
 ]
 
-# filter environment variables that the remote device does not need
-env_remove = [
-    "AMP_*",
-    "ANTHROPIC_*",
-    "VSCODE_*",
-]
-
 auto_identity_mounts = true

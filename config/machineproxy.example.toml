@@ -98,12 +98,7 @@ mounts = [
 
 # Env vars to strip from the container process (the executable launched
 # by machineproxy directly). Patterns are globs or /regex/ delimited.
-env_remove = [
-    "AMP_*",
-    "ANTHROPIC_*",
-    "MPROXY_*",
-    "VSCODE_*",
-]
+# env_remove = []
 
 # Path proxy: mount a FUSE directory containing one stub per remote-PATH
 # executable, and splice it into the container's PATH. Exec'ing a stub
