@@ -57,6 +57,9 @@ host = "remote.server.example.com"
 local_commands = [
     "/usr/bin/env",
 ]
+
+# The initial working directory of the first program launched in the container.
+# If unset, defaults to the first local path in the `container.mounts` array.
 # working_dir = "/workspace"
 
 # Docker Compose-style mounts: [local_path:]remote_path
