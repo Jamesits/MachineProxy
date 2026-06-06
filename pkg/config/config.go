@@ -258,6 +258,22 @@ type Config struct {
 		// Arch selects the remote-side agent binary's GOARCH. Empty
 		// triggers the same detection/fallback chain as OS.
 		Arch string `yaml:"arch" toml:"arch" json:"arch"`
+		// Bind sets the local source binding for the remote connection.
+		// It is either an IP literal (bind that source address) or a
+		// network interface name (bind the interface's first
+		// global-unicast address). Maps to net.Dialer.LocalAddr. Empty
+		// leaves source selection to the OS routing table. Applies to
+		// the SSH backend, and to docker/compose when the daemon is
+		// reached over TCP. For an ssh:// docker daemon, setting this
+		// switches from the system-ssh helper to the built-in ssh
+		// transport so the binding can apply. Ignored for local-socket
+		// daemons.
+		Bind string `yaml:"bind" toml:"bind" json:"bind"`
+		// BindInterface binds the connection socket to a network
+		// interface or VRF via SO_BINDTODEVICE. Linux only; setting it
+		// on other platforms fails when the connection is dialed. Empty
+		// = unset. Same backend applicability as Bind.
+		BindInterface string `yaml:"bind_interface" toml:"bind_interface" json:"bind_interface"`
 	} `yaml:"remote" toml:"remote" json:"remote"`
 
 	Container struct {

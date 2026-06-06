@@ -14,15 +14,19 @@ import (
 func init() {
 	registerBackend("docker", func(ctx context.Context, cfg *config.Config, log *slog.Logger) (remote.Backend, error) {
 		return remotedocker.New(ctx, remotedocker.Config{
-			Container: cfg.Remote.Docker.Container,
-			Host:      cfg.Remote.Docker.Host,
-			Log:       log.With("component", "docker"),
+			Container:     cfg.Remote.Docker.Container,
+			Host:          cfg.Remote.Docker.Host,
+			Bind:          cfg.Remote.Bind,
+			BindInterface: cfg.Remote.BindInterface,
+			Log:           log.With("component", "docker"),
 		})
 	})
 	registerBackend("compose", func(ctx context.Context, cfg *config.Config, log *slog.Logger) (remote.Backend, error) {
 		return remotedocker.NewFromCompose(ctx, remotedocker.Config{
-			Host: cfg.Remote.Compose.Host,
-			Log:  log.With("component", "compose"),
+			Host:          cfg.Remote.Compose.Host,
+			Bind:          cfg.Remote.Bind,
+			BindInterface: cfg.Remote.BindInterface,
+			Log:           log.With("component", "compose"),
 		}, cfg.Remote.Compose.Project, cfg.Remote.Compose.Service, cfg.Remote.Compose.Sequence)
 	})
 }

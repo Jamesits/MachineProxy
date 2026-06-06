@@ -16,6 +16,8 @@ import (
 	"github.com/jamesits/sshconf/pkg/stdio"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
+
+	"github.com/jamesits/machineproxy/pkg/dialer"
 )
 
 // DialConfig specifies the minimum identification parameters for a
@@ -32,6 +34,15 @@ type DialConfig struct {
 	// Timeout is the TCP connect timeout used when ssh_config's
 	// ConnectTimeout is unset. Zero means no timeout.
 	Timeout time.Duration
+	// Bind, when set, selects the local source binding for the TCP
+	// connection: either an IP literal (that source address) or a network
+	// interface name (the interface's first global-unicast address). Maps
+	// to net.Dialer.LocalAddr.
+	Bind string
+	// BindInterface, when set, binds the connection socket to a network
+	// interface or VRF via SO_BINDTODEVICE (Linux only; other platforms
+	// return an error from NewDialer).
+	BindInterface string
 }
 
 // Dialer carries a dial closure and metadata derived from the resolved
@@ -109,17 +120,23 @@ func NewDialer(cfg DialConfig) (*Dialer, error) {
 		keepalive = time.Duration(*opts.ServerAliveInterval) * time.Second
 	}
 
+	// Build the net.Dialer once so every reconnect reuses the same local
+	// binding. The lookups fail fast here rather than per dial attempt.
+	netDialer, err := dialer.New(cfg.Bind, cfg.BindInterface)
+	if err != nil {
+		return nil, fmt.Errorf("ssh local binding: %w", err)
+	}
+
 	return &Dialer{
 		Dial: func(ctx context.Context) (Conn, error) {
-			return dialSSH(ctx, addr, sshConfig)
+			return dialSSH(ctx, netDialer, addr, sshConfig)
 		},
 		Addr:              addr,
 		KeepAliveInterval: keepalive,
 	}, nil
 }
 
-func dialSSH(ctx context.Context, addr string, cfg *ssh.ClientConfig) (Conn, error) {
-	var d net.Dialer
+func dialSSH(ctx context.Context, d *net.Dialer, addr string, cfg *ssh.ClientConfig) (Conn, error) {
 	rawConn, err := d.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("dial ssh: %w", err)

@@ -14,13 +14,23 @@ level = "info"
 # --backend flag and scheme-prefixed destinations (ssh://, docker://,
 # compose://) override this at runtime.
 # type = "ssh"
+
 # Remote host OS and architecture used to select the agent binary.
 # If unset, an auto detection will be tried; if auto detection fails,
 # defaults to the local machine's runtime.GOOS / runtime.GOARCH.
 # os = "linux"
 # arch = "amd64"
 
-[remote.ssh]
+# Local source binding for the remote connection. Either an IP literal (bind
+# that source address) or a network interface name (bind the interface's first
+# global-unicast address).
+# bind = "192.0.2.10"
+# bind = "eth0"
+# Bind the connection socket to a network interface or VRF via SO_BINDTODEVICE
+# (Linux only; errors at dial time on other platforms).
+# bind_interface = "vrf-blue"
+
+# [remote.ssh]
 # host can be either a literal hostname/IP or a Host alias defined in
 # ~/.ssh/config. Identity keys, known_hosts, algorithms, and keepalive
 # intervals are resolved from the user's ssh_config.
@@ -36,8 +46,13 @@ host = "remote.server.example.com"
 # Connection settings honor the standard docker client env vars
 # (DOCKER_HOST, DOCKER_API_VERSION, DOCKER_TLS_VERIFY, DOCKER_CERT_PATH);
 # set host below to override DOCKER_HOST for this invocation only.
+# host accepts unix://, tcp:// (with TLS via a docker context), and
+# ssh://[user@]host[:port][/socket] daemons. ssh:// is served via the
+# system ssh binary by default; setting remote.bind/bind_interface switches
+# it to machineproxy's built-in ssh transport so the binding applies.
 # container = "my-dev-box"
 # host = "unix:///var/run/docker.sock"
+# host = "ssh://dev@docker-host.example.com"
 
 # [remote.compose]
 # Attach to a running Docker Compose service container. Equivalent to

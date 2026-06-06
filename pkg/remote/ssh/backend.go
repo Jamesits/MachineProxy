@@ -26,6 +26,12 @@ type Config struct {
 	// ConnectTimeout falls back to 10s when zero. ssh_config's
 	// ConnectTimeout still takes priority when set.
 	ConnectTimeout time.Duration
+	// Bind selects the local source binding (IP literal or interface name);
+	// see sshconn.DialConfig.Bind.
+	Bind string
+	// BindInterface binds the socket to an interface/VRF via SO_BINDTODEVICE
+	// (Linux only); see sshconn.DialConfig.BindInterface.
+	BindInterface string
 	// Log is used by the underlying manager.
 	Log *slog.Logger
 }
@@ -50,10 +56,12 @@ func New(cfg Config) (*Backend, error) {
 		timeout = 10 * time.Second
 	}
 	dialer, err := sshconn.NewDialer(sshconn.DialConfig{
-		Host:    cfg.Host,
-		User:    cfg.User,
-		Port:    cfg.Port,
-		Timeout: timeout,
+		Host:          cfg.Host,
+		User:          cfg.User,
+		Port:          cfg.Port,
+		Timeout:       timeout,
+		Bind:          cfg.Bind,
+		BindInterface: cfg.BindInterface,
 	})
 	if err != nil {
 		return nil, err

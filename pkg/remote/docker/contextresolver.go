@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -15,6 +16,8 @@ import (
 	"time"
 
 	"github.com/moby/moby/client"
+
+	"github.com/jamesits/machineproxy/pkg/dialer"
 )
 
 const (
@@ -26,7 +29,31 @@ const (
 )
 
 // resolveClientOpts returns docker client options that honour the full
-// Docker context resolution chain:
+// Docker context resolution chain (see resolveBaseOpts) and then sets up the
+// transport for the resolved daemon endpoint:
+//
+//   - ssh:// daemons are dialed via appendSSHDaemonDial (the moby client has
+//     no native ssh:// support); see that function for how remote.bind selects
+//     between the system-ssh helper and the built-in transport.
+//   - tcp:// daemons honour the optional local source binding (bind /
+//     bindInterface); see appendBindDial.
+//   - local-socket daemons ignore the binding with a warning.
+//
+// TLS contexts are fully supported.
+func resolveClientOpts(cfgHost, bind, bindInterface string, log *slog.Logger) ([]client.Opt, error) {
+	opts, host, err := resolveBaseOpts(cfgHost)
+	if err != nil {
+		return nil, err
+	}
+	if strings.HasPrefix(host, "ssh://") {
+		return appendSSHDaemonDial(opts, host, bind, bindInterface, log)
+	}
+	return appendBindDial(opts, host, bind, bindInterface, log)
+}
+
+// resolveBaseOpts implements the Docker context resolution chain and returns
+// both the client options and the effective daemon host string (empty means
+// the SDK's built-in default, i.e. the local unix socket):
 //
 //  1. cfgHost (machineproxy config) – highest priority
 //  2. DOCKER_HOST env – handled by client.FromEnv
@@ -34,20 +61,17 @@ const (
 //  4. currentContext in ~/.docker/config.json – context store lookup
 //  5. Rootless socket at $XDG_RUNTIME_DIR/docker.sock
 //  6. client.FromEnv default (/var/run/docker.sock on Linux)
-//
-// TLS contexts are fully supported. SSH-scheme contexts are passed through
-// as-is (docker/docker/client handles ssh:// natively via its dialer).
-func resolveClientOpts(cfgHost string) ([]client.Opt, error) {
+func resolveBaseOpts(cfgHost string) ([]client.Opt, string, error) {
 	base := []client.Opt{client.FromEnv}
 
 	// Explicit host in machineproxy config overrides everything.
 	if cfgHost != "" {
-		return append(base, client.WithHost(cfgHost)), nil
+		return append(base, client.WithHost(cfgHost)), cfgHost, nil
 	}
 
 	// DOCKER_HOST is set → client.FromEnv already handles it.
-	if os.Getenv(envDockerHost) != "" {
-		return base, nil
+	if h := os.Getenv(envDockerHost); h != "" {
+		return base, h, nil
 	}
 
 	// Determine which context to use.
@@ -60,15 +84,16 @@ func resolveClientOpts(cfgHost string) ([]client.Opt, error) {
 		// For the default context, check for a rootless Docker socket before
 		// falling back to the system socket (/var/run/docker.sock).
 		if sock := rootlessSocket(); sock != "" {
-			return append(base, client.WithHost("unix://"+sock)), nil
+			host := "unix://" + sock
+			return append(base, client.WithHost(host)), host, nil
 		}
-		return base, nil
+		return base, "", nil
 	}
 
 	// Load the named context from the store.
 	ep, err := endpointFromContextStore(contextName)
 	if err != nil {
-		return nil, fmt.Errorf("docker context %q: %w", contextName, err)
+		return nil, "", fmt.Errorf("docker context %q: %w", contextName, err)
 	}
 
 	opts := base
@@ -76,11 +101,46 @@ func resolveClientOpts(cfgHost string) ([]client.Opt, error) {
 		opts = append(opts, client.WithHost(ep.host))
 	}
 	if tlsOpt, err := ep.tlsClientOpt(contextName); err != nil {
-		return nil, err
+		return nil, "", err
 	} else if tlsOpt != nil {
 		opts = append(opts, tlsOpt)
 	}
-	return opts, nil
+	return opts, ep.host, nil
+}
+
+// appendBindDial appends a client.WithDialContext option that binds the local
+// side of a TCP daemon connection per bind / bindInterface. It must be applied
+// last: client.WithHost calls sockets.ConfigureTransport, which installs its
+// own DialContext, so overriding it has to happen afterwards. For local
+// sockets the binding is inapplicable and is skipped with a warning (ssh://
+// daemons are routed to appendSSHDaemonDial before reaching here). A 10s
+// connect timeout matches the SDK's default transport.
+func appendBindDial(opts []client.Opt, host, bind, bindInterface string, log *slog.Logger) ([]client.Opt, error) {
+	if bind == "" && bindInterface == "" {
+		return opts, nil
+	}
+	if log == nil {
+		log = slog.Default()
+	}
+	if isLocalSocket(host) {
+		log.Warn("remote.bind/remote.bind_interface ignored: docker daemon is reached over a local socket",
+			"host", hostForLog(host), "bind", bind, "bind_interface", bindInterface)
+		return opts, nil
+	}
+	d, err := dialer.New(bind, bindInterface)
+	if err != nil {
+		return nil, fmt.Errorf("docker daemon local binding: %w", err)
+	}
+	d.Timeout = 10 * time.Second
+	return append(opts, client.WithDialContext(d.DialContext)), nil
+}
+
+// hostForLog renders an empty (SDK-default) host as a readable placeholder.
+func hostForLog(host string) string {
+	if host == "" {
+		return "<default>"
+	}
+	return host
 }
 
 // dockerConfigFile is a minimal view of ~/.docker/config.json.

@@ -114,7 +114,7 @@ func NewFromCompose(ctx context.Context, cfg Config, project, service string, se
 		log = slog.Default()
 	}
 
-	opts, err := resolveClientOpts(cfg.Host)
+	opts, err := resolveClientOpts(cfg.Host, cfg.Bind, cfg.BindInterface, log)
 	if err != nil {
 		return nil, fmt.Errorf("compose context resolution: %w", err)
 	}

@@ -50,6 +50,8 @@ Create an empty directory on your local workstation at the same path as the remo
 
 ```shell
 cd /path/to/your/workspace/root
+machineproxy ssh://[user@]hostname[:port] -- <program>
+# or use a more SSH-like grammar:
 machineproxy [-p port] [[user@]hostname] -- <program>
 ```
 

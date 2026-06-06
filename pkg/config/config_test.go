@@ -141,6 +141,190 @@ container:
 	}
 }
 
+func TestLoadAcceptsBracketedIPv6Host(t *testing.T) {
+	// The config layer treats remote.ssh.host as an opaque string and only
+	// rejects an empty value; bracketed IPv6 literals (and IPv6 link-local
+	// "%zone" forms) must round-trip verbatim so downstream ssh_config
+	// resolution and net.JoinHostPort see exactly what the user wrote.
+	//
+	// Note the host value must be quoted in YAML: an unquoted "[...]" is a
+	// YAML flow sequence, not a string.
+	cases := []struct {
+		name string
+		host string
+	}{
+		{"global unicast", "[2001:db8::1]"},
+		{"loopback", "[::1]"},
+		{"unspecified", "[::]"},
+		{"link-local with zone", "[fe80::1%eth0]"},
+		{"link-local bare with zone", "[fe80::%eth0]"},
+		{"zone numeric scope id", "[fe80::1%25]"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := `
+remote:
+  ssh:
+    host: "` + tc.host + `"
+    user: dev
+container:
+  local_commands: []
+  mounts:
+    - /workspace
+`
+			cfg, err := Load(strings.NewReader(raw))
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if cfg.Remote.SSH.Host != tc.host {
+				t.Fatalf("Host = %q, want %q (brackets/zone must survive verbatim)", cfg.Remote.SSH.Host, tc.host)
+			}
+		})
+	}
+}
+
+func TestLoadAcceptsBracketedIPv6HostWithPort(t *testing.T) {
+	// host carries the bracketed literal; the port lives in its own field.
+	raw := `
+remote:
+  ssh:
+    host: "[fe80::1%eth0]"
+    user: dev
+    port: 2222
+container:
+  local_commands: []
+  mounts:
+    - /workspace
+`
+	cfg, err := Load(strings.NewReader(raw))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Remote.SSH.Host != "[fe80::1%eth0]" {
+		t.Fatalf("Host = %q, want %q", cfg.Remote.SSH.Host, "[fe80::1%eth0]")
+	}
+	if cfg.Remote.SSH.Port != 2222 {
+		t.Fatalf("Port = %d, want 2222", cfg.Remote.SSH.Port)
+	}
+}
+
+func TestLoadAcceptsBracketedIPv6HostTOML(t *testing.T) {
+	cases := []struct {
+		name string
+		host string
+	}{
+		{"global unicast", "[2001:db8::1]"},
+		{"loopback", "[::1]"},
+		{"link-local with zone", "[fe80::1%eth0]"},
+		{"link-local bare with zone", "[fe80::%eth0]"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := `
+[remote.ssh]
+host = "` + tc.host + `"
+user = "dev"
+
+[container]
+local_commands = []
+mounts = ["/workspace"]
+`
+			cfg, err := Load(strings.NewReader(raw))
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if cfg.Remote.SSH.Host != tc.host {
+				t.Fatalf("Host = %q, want %q (brackets/zone must survive verbatim)", cfg.Remote.SSH.Host, tc.host)
+			}
+		})
+	}
+}
+
+func TestLoadParsesBindConfig(t *testing.T) {
+	cases := []struct {
+		name              string
+		bind              string
+		bindInterface     string
+		wantBind          string
+		wantBindInterface string
+	}{
+		{"ip source bind", "192.0.2.10", "", "192.0.2.10", ""},
+		{"interface name bind", "eth0", "", "eth0", ""},
+		{"bind interface vrf", "", "vrf-blue", "", "vrf-blue"},
+		{"both set", "203.0.113.5", "eth1", "203.0.113.5", "eth1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := `
+remote:
+  ssh:
+    host: 127.0.0.1
+  bind: "` + tc.bind + `"
+  bind_interface: "` + tc.bindInterface + `"
+container:
+  local_commands: []
+  mounts:
+    - /workspace
+`
+			cfg, err := Load(strings.NewReader(raw))
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if cfg.Remote.Bind != tc.wantBind {
+				t.Fatalf("Bind = %q, want %q", cfg.Remote.Bind, tc.wantBind)
+			}
+			if cfg.Remote.BindInterface != tc.wantBindInterface {
+				t.Fatalf("BindInterface = %q, want %q", cfg.Remote.BindInterface, tc.wantBindInterface)
+			}
+		})
+	}
+}
+
+func TestLoadParsesBindConfigTOML(t *testing.T) {
+	raw := `
+[remote]
+bind = "192.0.2.10"
+bind_interface = "eth0"
+
+[remote.ssh]
+host = "127.0.0.1"
+
+[container]
+local_commands = []
+mounts = ["/workspace"]
+`
+	cfg, err := Load(strings.NewReader(raw))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Remote.Bind != "192.0.2.10" {
+		t.Fatalf("Bind = %q, want 192.0.2.10", cfg.Remote.Bind)
+	}
+	if cfg.Remote.BindInterface != "eth0" {
+		t.Fatalf("BindInterface = %q, want eth0", cfg.Remote.BindInterface)
+	}
+}
+
+func TestLoadDefaultsBindEmpty(t *testing.T) {
+	raw := `
+remote:
+  ssh:
+    host: 127.0.0.1
+container:
+  local_commands: []
+  mounts:
+    - /workspace
+`
+	cfg, err := Load(strings.NewReader(raw))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Remote.Bind != "" || cfg.Remote.BindInterface != "" {
+		t.Fatalf("expected empty bind defaults, got bind=%q bind_interface=%q",
+			cfg.Remote.Bind, cfg.Remote.BindInterface)
+	}
+}
+
 func TestLoadParsesAgentEnvConfig(t *testing.T) {
 	raw := `
 remote:

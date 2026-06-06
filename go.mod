@@ -3,6 +3,7 @@ module github.com/jamesits/machineproxy
 go 1.26.1
 
 require (
+	github.com/docker/cli v29.5.3+incompatible
 	github.com/fxamacker/cbor/v2 v2.9.2
 	github.com/hanwen/go-fuse/v2 v2.10.1
 	github.com/jamesits/sshconf v0.0.0-20260518084836-6ce2bdf84f47
@@ -30,11 +31,12 @@ require (
 	github.com/moby/moby/client v0.4.1
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
+	github.com/sirupsen/logrus v1.9.4 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
-	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.68.0 // indirect
-	go.opentelemetry.io/otel v1.43.0 // indirect
-	go.opentelemetry.io/otel/metric v1.43.0 // indirect
-	go.opentelemetry.io/otel/trace v1.43.0 // indirect
+	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.69.0 // indirect
+	go.opentelemetry.io/otel v1.44.0 // indirect
+	go.opentelemetry.io/otel/metric v1.44.0 // indirect
+	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	golang.org/x/term v0.43.0 // indirect
 )

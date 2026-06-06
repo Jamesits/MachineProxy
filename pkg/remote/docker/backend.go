@@ -23,7 +23,15 @@ import (
 type Config struct {
 	Container string
 	Host      string
-	Log       *slog.Logger
+	// Bind / BindInterface select the local source binding for the
+	// connection to the docker daemon. For a TCP daemon they bind the
+	// dial directly; for an ssh:// daemon they switch from the default
+	// system-ssh helper to machineproxy's built-in ssh transport (the
+	// only path that can honour the binding). Local-socket daemons ignore
+	// them. See pkg/dialer and sshconn.DialConfig for the shared semantics.
+	Bind          string
+	BindInterface string
+	Log           *slog.Logger
 }
 
 // Backend is a remote.Backend backed by the Docker SDK.
@@ -50,7 +58,7 @@ func New(ctx context.Context, cfg Config) (*Backend, error) {
 	if log == nil {
 		log = slog.Default()
 	}
-	opts, err := resolveClientOpts(cfg.Host)
+	opts, err := resolveClientOpts(cfg.Host, cfg.Bind, cfg.BindInterface, log)
 	if err != nil {
 		return nil, fmt.Errorf("docker context resolution: %w", err)
 	}

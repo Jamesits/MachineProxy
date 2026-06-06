@@ -19,6 +19,8 @@ func init() {
 			User:           cfg.Remote.SSH.User,
 			Port:           cfg.Remote.SSH.Port,
 			ConnectTimeout: 10 * time.Second,
+			Bind:           cfg.Remote.Bind,
+			BindInterface:  cfg.Remote.BindInterface,
 			Log:            log.With("component", "ssh"),
 		})
 	})
