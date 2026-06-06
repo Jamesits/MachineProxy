@@ -233,12 +233,11 @@ func (m *Manager) sendKeepAlive(ctx context.Context) error {
 
 func (m *Manager) closeLocked() error {
 	var firstErr error
-	if m.sftp != nil {
-		if err := m.sftp.Close(); err != nil && firstErr == nil {
-			firstErr = err
-		}
-		m.sftp = nil
-	}
+	// The Conn owns the SFTP client's lifecycle: NewSFTP caches the client and
+	// Conn.Close closes it. We only hold m.sftp as a cached reference for the
+	// SFTP() accessor, so drop it without closing to avoid a double-close
+	// (which surfaces as a spurious EOF on clean shutdown).
+	m.sftp = nil
 	if m.conn != nil {
 		if err := m.conn.Close(); err != nil && firstErr == nil {
 			firstErr = err
