@@ -8,20 +8,35 @@ func TestCommandIncludesAllBinds(t *testing.T) {
 	n := &Namespace{bwrapBin: "/usr/bin/bwrap"}
 	_, args := n.Command("/workspace", []string{"echo", "hi"}, []Bind{
 		{Src: "/tmp/fuse-ws", Dst: "/workspace"},
+		// Identity alias of the same FUSE dir at the remote path
+		// (auto_identity_mounts): same Src, distinct Dst.
+		{Src: "/tmp/fuse-ws", Dst: "/remote"},
 		{Src: "/tmp/fuse-stubs", Dst: "/home/user/.cache/machineproxy/pathstub"},
 	})
 
-	// Walk pairs of "--bind src dst" entries and confirm both binds appear.
-	have := map[string]string{}
+	// Walk pairs of "--bind src dst" entries and collect every (src,dst).
+	type pair struct{ src, dst string }
+	var have []pair
 	for i := 0; i+2 < len(args); i++ {
 		if args[i] == "--bind" {
-			have[args[i+1]] = args[i+2]
+			have = append(have, pair{args[i+1], args[i+2]})
 		}
 	}
-	if have["/tmp/fuse-ws"] != "/workspace" {
+	hasBind := func(src, dst string) bool {
+		for _, p := range have {
+			if p.src == src && p.dst == dst {
+				return true
+			}
+		}
+		return false
+	}
+	if !hasBind("/tmp/fuse-ws", "/workspace") {
 		t.Errorf("workspace bind missing: %v", have)
 	}
-	if have["/tmp/fuse-stubs"] != "/home/user/.cache/machineproxy/pathstub" {
+	if !hasBind("/tmp/fuse-ws", "/remote") {
+		t.Errorf("identity alias bind missing: %v", have)
+	}
+	if !hasBind("/tmp/fuse-stubs", "/home/user/.cache/machineproxy/pathstub") {
 		t.Errorf("stub bind missing: %v", have)
 	}
 

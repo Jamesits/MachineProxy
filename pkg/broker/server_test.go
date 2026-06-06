@@ -144,6 +144,67 @@ func TestBrokerReturns127WhenRemoteCannotStart(t *testing.T) {
 	}
 }
 
+func TestBrokerPathMapperRewritesCwdAndPath(t *testing.T) {
+	var got ExecRequest
+	// Mimic a workspace mount /localA -> /remote.
+	mapper := func(p string) string {
+		if p == "/localA" {
+			return "/remote"
+		}
+		if strings.HasPrefix(p, "/localA/") {
+			return "/remote" + p[len("/localA"):]
+		}
+		return p
+	}
+	srv := NewServer(Deps{Remote: recordingRunner{got: &got}, PathMapper: mapper})
+
+	serverConn, clientConn := net.Pipe()
+	t.Cleanup(func() {
+		_ = serverConn.Close()
+		_ = clientConn.Close()
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	go srv.serveConn(ctx, serverConn)
+
+	enc := NewEncoder(clientConn)
+	dec := NewDecoder(clientConn)
+	req := ExecRequest{Path: "/localA/bin/tool", Argv: []string{"tool"}, Cwd: "/localA/src"}
+	if err := enc.Encode(req); err != nil {
+		t.Fatalf("encode request: %v", err)
+	}
+
+	// Drain until the exit frame; by then Run has returned and recorded
+	// the (mapped) request.
+	for {
+		var frame Frame
+		if err := dec.Decode(&frame); err != nil {
+			t.Fatalf("decode frame: %v", err)
+		}
+		if frame.Stream == StreamExit {
+			break
+		}
+	}
+
+	if got.Path != "/remote/bin/tool" {
+		t.Errorf("Path = %q, want /remote/bin/tool", got.Path)
+	}
+	if got.Cwd != "/remote/src" {
+		t.Errorf("Cwd = %q, want /remote/src", got.Cwd)
+	}
+}
+
+type recordingRunner struct {
+	got *ExecRequest
+}
+
+func (r recordingRunner) Run(_ context.Context, req ExecRequest, _ io.Reader, _ io.Writer, _ io.Writer) (int, error) {
+	*r.got = req
+	return 0, nil
+}
+
 type fakeRemoteRunner struct {
 	stdout   string
 	stderr   string

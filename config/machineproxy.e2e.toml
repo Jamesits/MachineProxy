@@ -1,0 +1,27 @@
+# machineproxy config used by the CI end-to-end jobs (.github/workflows/build.yaml).
+#
+# It deliberately omits the [remote] section: the backend and its target are
+# selected on the command line instead, so the same file drives both the SSH
+# and the Docker e2e jobs:
+#   machineproxy --config config/machineproxy.e2e.toml machineproxy-e2e -- ...
+#   machineproxy --config config/machineproxy.e2e.toml docker://<id>     -- ...
+
+[logging]
+level = "trace"
+
+[container]
+# Exercise every mount form against the one remote workspace:
+#   /workspace            -> "remote" (single-token, local == remote)
+#   /mnt-diff:/workspace  -> "local:remote" with differing paths
+# auto_identity_mounts then appends the "local:remote equal" alias
+# (/workspace:/workspace), deduped against the explicit /workspace mount and
+# sharing its single FUSE mount.
+auto_identity_mounts = true
+mounts = [
+    "/workspace",
+    "/mnt-diff:/workspace",
+]
+env_remove = [
+    "GITHUB_*",
+    "RUNNER_*",
+]

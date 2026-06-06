@@ -9,7 +9,7 @@
 # *not* fail in that case — goreleaser invokes the same before.hooks on
 # every machine and we don't want CI to break on Linux.
 
-set -euo pipefail
+set -Eeuo pipefail
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
     echo "build-interposer.sh: skipping (host is not darwin)"

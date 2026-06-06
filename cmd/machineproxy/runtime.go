@@ -9,7 +9,6 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"syscall"
 	"time"
 
@@ -34,12 +33,18 @@ type runtimeDeps struct {
 
 	backend         remote.Backend
 	namespace       *ns.Namespace
-	fuseServer      *fuse.Server
 	bkr             *broker.Server
-	fuseMountDir    string
 	recorder        *agentproto.Recorder
 	brokerSocket    string // auto-generated temp socket path
 	brokerSocketDir string // private directory containing broker socket
+
+	// mounts holds every realized container mount. Each distinct remote
+	// path gets its own FUSE server; entries that share a remote path
+	// (e.g. the identity entries added by container.auto_identity_mounts)
+	// reuse an earlier mount's FUSE dir and carry a nil server, so the
+	// same content is bound at several container paths via a single mount.
+	// Populated by MountWorkspace; mounts[0] is the workspace.
+	mounts []mountInstance
 
 	// Path-stub state. pathStubServer/MountDir are populated only when
 	// cfg.Container.PathProxy is "prepend" or "append" and the
@@ -61,6 +66,17 @@ type runtimeDeps struct {
 	cwdTo   string
 
 	brokerCtxCancel context.CancelFunc
+}
+
+// mountInstance is one realized container mount. mount carries the
+// container path and the remote-home-expanded remote path. fuseDir is the
+// host directory where the remote subtree is FUSE-mounted; server owns that
+// FUSE mount, or is nil when this instance reuses an earlier same-remote
+// mount's fuseDir (only an extra bind is needed, not a second FUSE server).
+type mountInstance struct {
+	mount   config.Mount
+	fuseDir string
+	server  *fuse.Server
 }
 
 func newRuntimeDeps(ctx context.Context, cfg *config.Config, log *slog.Logger) (*runtimeDeps, error) {
@@ -107,18 +123,30 @@ func (d *runtimeDeps) Close() {
 		}
 		d.pathStubMountDir = ""
 	}
-	if d.fuseServer != nil {
-		if err := d.fuseServer.Unmount(); err != nil {
-			d.log.Warn("failed to unmount fuse", "error", err)
+	// Unmount every FUSE server first, then remove the host dirs. Several
+	// instances may share a fuseDir (same remote path), so remove each dir
+	// only once.
+	for _, inst := range d.mounts {
+		if inst.server != nil {
+			if err := inst.server.Unmount(); err != nil {
+				d.log.Warn("failed to unmount fuse", "error", err, "mount_dir", inst.fuseDir)
+			}
 		}
-		d.fuseServer = nil
 	}
-	if d.fuseMountDir != "" {
-		if err := os.RemoveAll(d.fuseMountDir); err != nil {
-			d.log.Warn("failed to remove fuse mount dir", "error", err)
+	removed := make(map[string]struct{}, len(d.mounts))
+	for _, inst := range d.mounts {
+		if inst.fuseDir == "" {
+			continue
 		}
-		d.fuseMountDir = ""
+		if _, done := removed[inst.fuseDir]; done {
+			continue
+		}
+		removed[inst.fuseDir] = struct{}{}
+		if err := os.RemoveAll(inst.fuseDir); err != nil {
+			d.log.Warn("failed to remove fuse mount dir", "error", err, "mount_dir", inst.fuseDir)
+		}
 	}
+	d.mounts = nil
 	d.namespace.Leave()
 	if d.backend != nil {
 		if err := d.backend.Close(); err != nil {
@@ -218,103 +246,155 @@ func (d *runtimeDeps) EnterNamespace(ctx context.Context) error {
 	return nil
 }
 
+// MountWorkspace realizes every container mount. Each distinct remote path
+// gets its own FUSE server; entries that share a remote path (notably the
+// identity aliases added by container.auto_identity_mounts) reuse the first
+// mount's FUSE dir so the same content is later bound at several container
+// paths. mounts[0] is the workspace and drives working-dir/cwd resolution.
 func (d *runtimeDeps) MountWorkspace(ctx context.Context) error {
 	if err := preflightFUSE(); err != nil {
 		return err
-	}
-
-	mount, err := config.ParseMount(d.cfg.Container.Mounts[0])
-	if err != nil {
-		return fmt.Errorf("parse workspace mount: %w", err)
 	}
 
 	fc, err := d.backend.Files(ctx)
 	if err != nil {
 		return err
 	}
-
 	remoteHome, err := fc.Getwd()
 	if err != nil {
 		return fmt.Errorf("get remote home dir for mount expansion: %w", err)
 	}
-	resolvedRemote, err := config.ExpandRemoteHome(mount.RemotePath, remoteHome)
-	if err != nil {
-		return fmt.Errorf("expand remote mount path %q: %w", mount.RemotePath, err)
-	}
-	mount.RemotePath = resolvedRemote
-	d.workspaceMount = mount
-
-	d.log.Log(ctx, logging.LevelTrace, "mounting workspace", "remote_path", mount.RemotePath)
-
-	st, err := fc.Stat(mount.RemotePath)
-	if err != nil {
-		err = fmt.Errorf("remote workspace %q not reachable: %w", mount.RemotePath, err)
-		d.log.Error("workspace not found", "error", err)
-		return err
-	}
-	if !st.IsDir() {
-		err = fmt.Errorf("remote workspace %q is not a directory", mount.RemotePath)
-		d.log.Error("workspace not a directory", "error", err)
-		return err
-	}
-
-	tmpDir, err := os.MkdirTemp("", "machineproxy-fuse-*")
-	if err != nil {
-		return fmt.Errorf("create temp mountpoint: %w", err)
-	}
-	// Canonicalize the path so it matches what the child sees via
-	// os.Getwd later. On darwin, /var → /private/var is a symlink that
-	// otherwise breaks the broker's pathMapper prefix match.
-	if resolved, rerr := filepath.EvalSymlinks(tmpDir); rerr == nil {
-		tmpDir = resolved
-	}
-	d.fuseMountDir = tmpDir
-
-	// On darwin there is no kernel-level bind-mount equivalent, so the
-	// FUSE mount lives at its real temp path rather than being mapped
-	// into a stable container_path. Rewrite the mount metadata to that
-	// real path; the broker's pathMapper translates that prefix to the
-	// remote path when forwarding execs and file requests.
-	if runtime.GOOS == "darwin" && mount.ContainerPath != tmpDir {
-		if mount.ContainerPath != "" {
-			d.log.Warn("darwin: overriding container_path with FUSE mount dir (no bind-mount available)",
-				"configured", mount.ContainerPath,
-				"effective", tmpDir,
-			)
-		}
-		mount.ContainerPath = tmpDir
-		d.workspaceMount = mount
-	}
-
-	success := false
-	defer func() {
-		if success {
-			return
-		}
-		if d.fuseServer != nil {
-			if uerr := d.fuseServer.Unmount(); uerr != nil {
-				d.log.Warn("failed to unmount fuse after mount error", "error", uerr)
-			}
-			d.fuseServer = nil
-		}
-		if rerr := os.RemoveAll(tmpDir); rerr != nil {
-			d.log.Warn("failed to remove fuse mount dir after mount error", "error", rerr)
-		}
-		d.fuseMountDir = ""
-	}()
 
 	fsLog := d.log.With("component", "fuse")
 	opts, err := workspacefsOptions(d.cfg)
 	if err != nil {
 		return fmt.Errorf("workspace fs options: %w", err)
 	}
-	backend := workspacefs.New(fc, mount.RemotePath, fsLog, opts)
-	server, err := workspacefs.Mount(ctx, backend, d.fuseMountDir)
-	if err != nil {
-		return fmt.Errorf("mount workspace fuse: %w", err)
+
+	// fuseByRemote maps a resolved remote path to the FUSE dir already
+	// serving it, so repeated remote paths share one server. containerSeen
+	// guards against two mounts claiming the same bind target.
+	fuseByRemote := make(map[string]string)
+	containerSeen := make(map[string]struct{})
+
+	success := false
+	defer func() {
+		if success {
+			return
+		}
+		for _, inst := range d.mounts {
+			if inst.server != nil {
+				if uerr := inst.server.Unmount(); uerr != nil {
+					d.log.Warn("failed to unmount fuse after mount error", "error", uerr)
+				}
+			}
+		}
+		removed := make(map[string]struct{}, len(d.mounts))
+		for _, inst := range d.mounts {
+			if inst.fuseDir == "" {
+				continue
+			}
+			if _, done := removed[inst.fuseDir]; done {
+				continue
+			}
+			removed[inst.fuseDir] = struct{}{}
+			if rerr := os.RemoveAll(inst.fuseDir); rerr != nil {
+				d.log.Warn("failed to remove fuse mount dir after mount error", "error", rerr)
+			}
+		}
+		d.mounts = nil
+	}()
+
+	for _, raw := range d.cfg.Container.Mounts {
+		mount, perr := config.ParseMount(raw)
+		if perr != nil {
+			return fmt.Errorf("parse mount %q: %w", raw, perr)
+		}
+		resolvedRemote, eerr := config.ExpandRemoteHome(mount.RemotePath, remoteHome)
+		if eerr != nil {
+			return fmt.Errorf("expand remote mount path %q: %w", mount.RemotePath, eerr)
+		}
+		mount.RemotePath = resolvedRemote
+
+		d.log.Log(ctx, logging.LevelTrace, "mounting workspace",
+			"remote_path", mount.RemotePath, "container_path", mount.ContainerPath)
+
+		// Reuse an existing FUSE mount when another entry already serves
+		// this remote path; otherwise stand up a fresh server for it.
+		fuseDir, shared := fuseByRemote[mount.RemotePath]
+		var server *fuse.Server
+		if shared {
+			d.log.Debug("reusing fuse mount for shared remote path",
+				"remote_path", mount.RemotePath, "mount_dir", fuseDir)
+		} else {
+			st, serr := fc.Stat(mount.RemotePath)
+			if serr != nil {
+				serr = fmt.Errorf("remote mount %q not reachable: %w", mount.RemotePath, serr)
+				d.log.Error("mount not found", "error", serr)
+				return serr
+			}
+			if !st.IsDir() {
+				err = fmt.Errorf("remote mount %q is not a directory", mount.RemotePath)
+				d.log.Error("mount not a directory", "error", err)
+				return err
+			}
+
+			tmpDir, terr := os.MkdirTemp("", "machineproxy-fuse-*")
+			if terr != nil {
+				return fmt.Errorf("create temp mountpoint: %w", terr)
+			}
+			// Canonicalize so it matches what the child sees via os.Getwd
+			// later. On darwin /var → /private/var is a symlink that would
+			// otherwise break the broker's pathMapper prefix match.
+			if resolved, rerr := filepath.EvalSymlinks(tmpDir); rerr == nil {
+				tmpDir = resolved
+			}
+			fuseDir = tmpDir
+
+			backend := workspacefs.New(fc, mount.RemotePath, fsLog, opts)
+			server, err = workspacefs.Mount(ctx, backend, fuseDir)
+			if err != nil {
+				return fmt.Errorf("mount workspace fuse: %w", err)
+			}
+			fuseByRemote[mount.RemotePath] = fuseDir
+			d.log.Debug("workspace mounted", "mount_dir", fuseDir, "remote_path", mount.RemotePath)
+		}
+
+		// On darwin there is no kernel-level bind-mount, so each mount lives
+		// at its real FUSE temp path rather than at its configured container
+		// path; the broker's pathMapper translates that prefix to the remote
+		// path. Identity aliases cannot be realized without bind mounts.
+		if runtime.GOOS == "darwin" && mount.ContainerPath != fuseDir {
+			if mount.ContainerPath != "" {
+				d.log.Warn("darwin: overriding container_path with FUSE mount dir (no bind-mount available)",
+					"configured", mount.ContainerPath,
+					"effective", fuseDir,
+				)
+			}
+			mount.ContainerPath = fuseDir
+		}
+
+		// Two mounts at the same container path would collide as bind
+		// targets; keep the first and warn about the rest.
+		if _, dup := containerSeen[mount.ContainerPath]; dup {
+			d.log.Warn("duplicate container path; ignoring later mount",
+				"container_path", mount.ContainerPath, "remote_path", mount.RemotePath, "mount", raw)
+			continue
+		}
+		containerSeen[mount.ContainerPath] = struct{}{}
+
+		d.mounts = append(d.mounts, mountInstance{
+			mount:   mount,
+			fuseDir: fuseDir,
+			server:  server,
+		})
 	}
-	d.fuseServer = server
-	d.log.Debug("workspace mounted", "mount_dir", tmpDir, "remote_path", mount.RemotePath)
+
+	if len(d.mounts) == 0 {
+		return errors.New("no container mounts configured")
+	}
+	d.workspaceMount = d.mounts[0].mount
+
 	success = true
 	return nil
 }
@@ -461,40 +541,21 @@ func (d *runtimeDeps) StartBroker(ctx context.Context) error {
 		}
 	}
 
-	containerPrefix := d.workspaceMount.ContainerPath
-	remotePrefix := d.workspaceMount.RemotePath
 	stubPrefix := d.cfg.Container.PathStubDir
 	stubMap := d.stubEntries
 
-	hasWorkspaceRewrite := containerPrefix != remotePrefix
-	hasStubRewrite := len(stubMap) > 0
-	var pathMapper func(string) string
-	if hasWorkspaceRewrite || hasStubRewrite {
-		pathMapper = func(p string) string {
-			if hasStubRewrite && strings.HasPrefix(p, stubPrefix+"/") {
-				name := p[len(stubPrefix)+1:]
-				if e, ok := stubMap[name]; ok {
-					return e.RemotePath
-				}
-			}
-			if hasWorkspaceRewrite {
-				if p == containerPrefix {
-					return remotePrefix
-				}
-				if strings.HasPrefix(p, containerPrefix+"/") {
-					return remotePrefix + p[len(containerPrefix):]
-				}
-			}
-			return p
-		}
+	mounts := make([]config.Mount, len(d.mounts))
+	for i, inst := range d.mounts {
+		mounts[i] = inst.mount
 	}
+	pathMapper := buildPathMapper(mounts, stubPrefix, stubMap)
 
 	brokerLog := d.log.With("component", "broker")
 	envKeep := d.cfg.Agent.EnvKeep
 	envRemove := d.cfg.Agent.EnvRemove
 	_ = envKeep
 	stripStub := stubPrefix
-	if !hasStubRewrite {
+	if len(stubMap) == 0 {
 		stripStub = ""
 	}
 	d.bkr = broker.NewServer(broker.Deps{
@@ -586,8 +647,6 @@ func (d *runtimeDeps) RunChild(ctx context.Context, cmdline []string) error {
 		pathInj,
 	)
 
-	mount := d.workspaceMount
-
 	// Pick the directory to launch the first program in (container.cwd_mode).
 	// An explicit mode with an invalid working_dir fails startup here.
 	workingDir, err := d.resolveWorkingDir()
@@ -597,7 +656,13 @@ func (d *runtimeDeps) RunChild(ctx context.Context, cmdline []string) error {
 	// Enable the tracer's getcwd/$PWD remap hook when container.cwd_remap=remote.
 	d.resolveCwdRemap()
 
-	binds := []ns.Bind{{Src: d.fuseMountDir, Dst: mount.ContainerPath}}
+	// Bind every realized mount into the container. Instances that share a
+	// remote path point at the same FUSE dir, so the same content surfaces
+	// at each container path (this is what makes auto_identity_mounts work).
+	binds := make([]ns.Bind, 0, len(d.mounts)+1)
+	for _, inst := range d.mounts {
+		binds = append(binds, ns.Bind{Src: inst.fuseDir, Dst: inst.mount.ContainerPath})
+	}
 	if d.pathStubMountDir != "" {
 		binds = append(binds, ns.Bind{Src: d.pathStubMountDir, Dst: d.cfg.Container.PathStubDir})
 	}

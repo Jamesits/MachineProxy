@@ -165,8 +165,8 @@ jobs:
           mkdir -p "test/ssh-server/${{ matrix.template }}/workspace"
           chmod a+rwX "test/ssh-server/${{ matrix.template }}/workspace"
           # Local mount point machineproxy uses for the FUSE/SFTP overlay.
-          sudo mkdir -p /workspace
-          sudo chown "$USER" /workspace
+          sudo mkdir -p /workspace /mnt-diff
+          sudo chown "$USER" /workspace /mnt-diff
 
       - name: Start SSH server (${{ matrix.template }})
         working-directory: test/ssh-server/${{ matrix.template }}
@@ -177,27 +177,6 @@ jobs:
       - name: Trust SSH host key
         run: ssh-keyscan -p 12222 ::1 >> ~/.ssh/known_hosts
 
-      - name: Write machineproxy config
-        run: |
-          # No components block: with the deb installed, machineproxy
-          # auto-discovers shim/tracer/agent in /usr/lib/machineproxy/.
-          cat > /tmp/e2e.yaml <<'EOF'
-          logging:
-            level: trace
-
-          remote:
-            ssh:
-              host: machineproxy-e2e
-
-          container:
-            mounts:
-              - /workspace
-            env_remove:
-              - GITHUB_*
-              - RUNNER_*
-          EOF
-          cat /tmp/e2e.yaml
-
       - name: Smoke-test the SSH path
         run: |
           ssh machineproxy-e2e 'cat /etc/os-release; uname -a'
@@ -205,10 +184,13 @@ jobs:
       - name: E2E - remote exec returns the container's OS
         env:
           MPROXY: /usr/bin/machineproxy
+          # The config carries no [remote] section; the SSH host alias is the
+          # command-line destination (resolved via ~/.ssh/config).
+          MPROXY_CONFIG: config/machineproxy.e2e.toml
         # The entrypoint program executes locally. Let it exec another program to actually do anything on the remote.
         run: |
-          set -euo pipefail
-          out=$("$MPROXY" --config /tmp/e2e.yaml -- bash -c 'cat /etc/os-release')
+          set -Eeuo pipefail
+          out=$("$MPROXY" --config "$MPROXY_CONFIG" machineproxy-e2e -- bash -c 'cat /etc/os-release')
           printf '%s\n' "$out"
           case "${{ matrix.template }}" in
             centos-7)  echo "$out" | grep -Eqi 'centos|^ID=.*centos' ;;
@@ -219,15 +201,24 @@ jobs:
       - name: E2E - workspace mount round-trip
         env:
           MPROXY: /usr/bin/machineproxy
+          MPROXY_CONFIG: config/machineproxy.e2e.toml
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
           marker="e2e-$(date +%s)-${{ matrix.template }}"
+
           # Drop a marker into the container's /workspace from the SSH side.
           ssh machineproxy-e2e "printf '%s' '$marker' > /workspace/marker.txt"
+
           # Read it back through machineproxy; cat is not in local_commands,
           # so it should be exec'd on the remote.
-          got=$("$MPROXY" --config /tmp/e2e.yaml -- cat /workspace/marker.txt)
+          got=$("$MPROXY" --config "$MPROXY_CONFIG" machineproxy-e2e -- cat /workspace/marker.txt)
           test "$got" = "$marker"
+          
+          # The same remote workspace is also mounted at a differing container
+          # path (/mnt-diff -> remote /workspace); the initial command runs
+          # locally, so this reads through the bind and proves the mount.
+          got_diff=$("$MPROXY" --config "$MPROXY_CONFIG" machineproxy-e2e -- cat /mnt-diff/marker.txt)
+          test "$got_diff" = "$marker"
 
       - name: Capture SSH server logs
         if: always()
@@ -282,8 +273,8 @@ jobs:
         run: |
           mkdir -p "test/ssh-server/${{ matrix.template }}/workspace"
           chmod a+rwX "test/ssh-server/${{ matrix.template }}/workspace"
-          sudo mkdir -p /workspace
-          sudo chown "$USER" /workspace
+          sudo mkdir -p /workspace /mnt-diff
+          sudo chown "$USER" /workspace /mnt-diff
 
       - name: Start target container (${{ matrix.template }})
         working-directory: test/ssh-server/${{ matrix.template }}
@@ -307,28 +298,6 @@ jobs:
           echo "id=$cid" >> "$GITHUB_OUTPUT"
           echo "Container ID: $cid"
 
-      - name: Write machineproxy config
-        env:
-          CONTAINER_ID: ${{ steps.container.outputs.id }}
-        run: |
-          cat > /tmp/e2e-docker.yaml <<EOF
-          logging:
-            level: trace
-
-          remote:
-            type: docker
-            docker:
-              container: ${CONTAINER_ID}
-
-          container:
-            mounts:
-              - /workspace
-            env_remove:
-              - GITHUB_*
-              - RUNNER_*
-          EOF
-          cat /tmp/e2e-docker.yaml
-
       - name: Smoke-test via docker exec
         env:
           CONTAINER_ID: ${{ steps.container.outputs.id }}
@@ -338,9 +307,13 @@ jobs:
       - name: E2E - remote exec returns the container's OS
         env:
           MPROXY: /usr/bin/machineproxy
+          # The config carries no [remote] section; the docker:// destination
+          # on the command line selects the backend and target container.
+          MPROXY_CONFIG: config/machineproxy.e2e.toml
+          CONTAINER_ID: ${{ steps.container.outputs.id }}
         run: |
-          set -euo pipefail
-          out=$("$MPROXY" --config /tmp/e2e-docker.yaml -- bash -c 'cat /etc/os-release')
+          set -Eeuo pipefail
+          out=$("$MPROXY" --config "$MPROXY_CONFIG" "docker://$CONTAINER_ID" -- bash -c 'cat /etc/os-release')
           printf '%s\n' "$out"
           case "${{ matrix.template }}" in
             centos-7)  echo "$out" | grep -Eqi 'centos|^ID=.*centos' ;;
@@ -351,16 +324,25 @@ jobs:
       - name: E2E - workspace mount round-trip
         env:
           MPROXY: /usr/bin/machineproxy
+          MPROXY_CONFIG: config/machineproxy.e2e.toml
           CONTAINER_ID: ${{ steps.container.outputs.id }}
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
           marker="e2e-docker-$(date +%s)-${{ matrix.template }}"
+
           # Drop a marker into the container's /workspace via docker exec.
           docker exec "$CONTAINER_ID" sh -c "printf '%s' '$marker' > /workspace/marker.txt"
+
           # Read it back through machineproxy; cat is not in local_commands,
           # so it should be exec'd on the remote (docker exec).
-          got=$("$MPROXY" --config /tmp/e2e-docker.yaml -- cat /workspace/marker.txt)
+          got=$("$MPROXY" --config "$MPROXY_CONFIG" "docker://$CONTAINER_ID" -- cat /workspace/marker.txt)
           test "$got" = "$marker"
+
+          # The same remote workspace is also mounted at a differing container
+          # path (/mnt-diff -> remote /workspace); the initial command runs
+          # locally, so this reads through the bind and proves the mount.
+          got_diff=$("$MPROXY" --config "$MPROXY_CONFIG" "docker://$CONTAINER_ID" -- cat /mnt-diff/marker.txt)
+          test "$got_diff" = "$marker"
 
       - name: Capture container logs
         if: always()
