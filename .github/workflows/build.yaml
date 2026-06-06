@@ -182,7 +182,7 @@ jobs:
           # No components block: with the deb installed, machineproxy
           # auto-discovers shim/tracer/agent in /usr/lib/machineproxy/.
           cat > /tmp/e2e.yaml <<'EOF'
-          log:
+          logging:
             level: trace
 
           remote:
@@ -312,7 +312,7 @@ jobs:
           CONTAINER_ID: ${{ steps.container.outputs.id }}
         run: |
           cat > /tmp/e2e-docker.yaml <<EOF
-          log:
+          logging:
             level: trace
 
           remote:
