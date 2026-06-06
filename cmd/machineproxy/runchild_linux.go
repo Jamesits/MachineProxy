@@ -24,7 +24,7 @@ func (d *runtimeDeps) buildChildInvocation(ctx context.Context, cmdline []string
 		tracerBin,
 		"--shim-path", shimBin,
 		"--broker-sock", d.brokerSocket,
-		"--log-level", d.cfg.LogLevel,
+		"--log-level", d.cfg.Logging.Level,
 	}
 	if len(d.cfg.Container.LocalCommands) > 0 {
 		argv = append(argv, "--whitelist", strings.Join(d.cfg.Container.LocalCommands, ":"))

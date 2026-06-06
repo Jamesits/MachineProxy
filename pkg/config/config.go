@@ -213,8 +213,13 @@ func isAbsOrHomeRelative(p string) bool {
 
 // Config describes machineproxy runtime behavior.
 type Config struct {
-	LogLevel string `yaml:"log_level" toml:"log_level" json:"log_level"` // trace, debug, info, warn, error
-	LogFile  string `yaml:"log_file"  toml:"log_file"  json:"log_file"`  // empty = stderr
+	Logging struct {
+		Level string `yaml:"level" toml:"level" json:"level"` // trace, debug, info, warn, error
+		File  string `yaml:"file"  toml:"file"  json:"file"`  // empty = stderr
+		// RecordingFile, when set, records the session in MachineProxy's
+		// wire format. Empty disables recording.
+		RecordingFile string `yaml:"recording_file" toml:"recording_file" json:"recording_file"`
+	} `yaml:"logging" toml:"logging" json:"logging"`
 
 	Remote struct {
 		// Type selects the backend implementation: "ssh" (default) or
@@ -345,15 +350,11 @@ type Config struct {
 		AgentLocalPath  string `yaml:"agent_local_path" toml:"agent_local_path" json:"agent_local_path"`
 		AgentRemotePath string `yaml:"agent_remote_path" toml:"agent_remote_path" json:"agent_remote_path"`
 	} `yaml:"components" toml:"components" json:"components"`
-
-	Recording struct {
-		Path string `yaml:"path" toml:"path" json:"path"` // empty disables recording
-	} `yaml:"recording" toml:"recording" json:"recording"`
 }
 
 func (c *Config) applyDefaults() error {
-	if c.LogLevel == "" {
-		c.LogLevel = "info"
+	if c.Logging.Level == "" {
+		c.Logging.Level = "info"
 	}
 	if c.Remote.Type == "" {
 		c.Remote.Type = "ssh"
@@ -407,14 +408,14 @@ func (c *Config) applyDefaults() error {
 		name string
 		ptr  *string
 	}{
-		{"log_file", &c.LogFile},
+		{"logging.file", &c.Logging.File},
 		{"container.path_stub_dir", &c.Container.PathStubDir},
 		{"container.working_dir", &c.Container.WorkingDir},
 		{"components.shim_path", &c.Components.ShimPath},
 		{"components.tracer_path", &c.Components.TracerPath},
 		{"components.interposer_path", &c.Components.InterposerPath},
 		{"components.agent_local_path", &c.Components.AgentLocalPath},
-		{"recording.path", &c.Recording.Path},
+		{"logging.recording_file", &c.Logging.RecordingFile},
 	} {
 		if *f.ptr == "" {
 			continue
@@ -513,10 +514,10 @@ func splitMountRaw(s string) (local, remote string, ok bool) {
 }
 
 func (c *Config) Validate() error {
-	switch c.LogLevel {
+	switch c.Logging.Level {
 	case "trace", "debug", "info", "warn", "error":
 	default:
-		return fmt.Errorf("log_level must be one of trace, debug, info, warn, error; got %q", c.LogLevel)
+		return fmt.Errorf("logging.level must be one of trace, debug, info, warn, error; got %q", c.Logging.Level)
 	}
 	switch c.Remote.Type {
 	case "ssh":

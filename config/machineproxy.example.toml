@@ -1,7 +1,13 @@
+[logging]
 # Log verbosity: trace, debug, info, warn, error
-log_level = "info"
+level = "info"
+
 # Log destination: omit or leave empty to write to stderr; set to a file path to append there instead.
-# log_file = "/var/log/machineproxy.log"
+# file = "/var/log/machineproxy.log"
+
+# Record the session in MachineProxy's wire format; omit or leave empty to disable.
+# Wire format is internal and not stable. For debugging only.
+# recording_file = "/tmp/machineproxy-session.rec"
 
 [remote]
 # Backend selector: "ssh" (default), "docker", or "compose". The CLI
@@ -199,7 +205,3 @@ mounts = [
 # interposer_path = "/usr/local/lib/machineproxy/agent/darwin/arm64/libmproxy_interposer.dylib"  # darwin only; replaces the tracer
 # agent_local_path = "/usr/lib/machineproxy/agent/linux/amd64/mproxy-agent"
 # agent_remote_path = "/tmp/mproxy-agent"
-
-# Record the session in MachineProxy's wire format.
-# [recording]
-# path = "/tmp/machineproxy-session.rec"

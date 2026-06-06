@@ -123,12 +123,12 @@ func run(rawArgs []string) error {
 
 	ctx := context.Background()
 
-	logWriter, logCloser, err := openLogWriter(cfg.LogFile)
+	logWriter, logCloser, err := openLogWriter(cfg.Logging.File)
 	if err != nil {
-		return fmt.Errorf("open log_file %q: %w", cfg.LogFile, err)
+		return fmt.Errorf("open logging.file %q: %w", cfg.Logging.File, err)
 	}
 	defer logCloser()
-	log := logging.Setup(cfg.LogLevel, logWriter)
+	log := logging.Setup(cfg.Logging.Level, logWriter)
 	log.Debug("config loaded", "path", parsed.cfgPath, "version", config.Version)
 	if cfgJSON, err := json.Marshal(cfg); err == nil {
 		log.Log(ctx, logging.LevelTrace, "parsed config", "content", string(cfgJSON))

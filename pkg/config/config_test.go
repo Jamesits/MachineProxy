@@ -504,8 +504,8 @@ components:
   tracer_path: ~/bin/mproxy-tracer
   agent_local_path: ~/bin/mproxy-agent
   agent_remote_path: ~/remote/mproxy-agent
-recording:
-  path: ~/recordings/session
+logging:
+  recording_file: ~/recordings/session
 `
 	cfg, err := Load(strings.NewReader(raw))
 	if err != nil {
@@ -519,7 +519,7 @@ recording:
 		{"shim_path", cfg.Components.ShimPath, filepath.Join(home, "bin/mproxy-shim")},
 		{"tracer_path", cfg.Components.TracerPath, filepath.Join(home, "bin/mproxy-tracer")},
 		{"agent_local_path", cfg.Components.AgentLocalPath, filepath.Join(home, "bin/mproxy-agent")},
-		{"recording.path", cfg.Recording.Path, filepath.Join(home, "recordings/session")},
+		{"logging.recording_file", cfg.Logging.RecordingFile, filepath.Join(home, "recordings/session")},
 	} {
 		if c.got != c.want {
 			t.Errorf("%s = %q, want %q", c.name, c.got, c.want)
@@ -623,7 +623,8 @@ container:
 
 func TestLoadParsesTOMLConfig(t *testing.T) {
 	raw := `
-log_level = "debug"
+[logging]
+level = "debug"
 
 [remote]
 os = "linux"
@@ -643,8 +644,8 @@ mounts = ["/workspace", "/local:/remote"]
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if cfg.LogLevel != "debug" {
-		t.Fatalf("expected log_level debug, got %q", cfg.LogLevel)
+	if cfg.Logging.Level != "debug" {
+		t.Fatalf("expected logging.level debug, got %q", cfg.Logging.Level)
 	}
 	if cfg.Remote.SSH.Host != "127.0.0.1" || cfg.Remote.SSH.Port != 2222 {
 		t.Fatalf("unexpected ssh: %+v", cfg.Remote.SSH)
@@ -707,7 +708,6 @@ container:
 
 func TestLoadTOMLRejectsUnknownFields(t *testing.T) {
 	raw := `
-log_level = "info"
 mystery_field = "nope"
 
 [remote.ssh]
@@ -734,7 +734,7 @@ func TestDetectFormat(t *testing.T) {
 		{"yaml with leading comments", "# a\n# b\nkey: v\n", FormatYAML},
 		{"toml section header", "[remote]\nhost = \"x\"\n", FormatTOML},
 		{"toml double-bracket", "[[servers]]\nname = \"x\"\n", FormatTOML},
-		{"toml with leading kv", "log_level = \"info\"\n\n[remote]\n", FormatTOML},
+		{"toml with leading kv", "title = \"info\"\n\n[remote]\n", FormatTOML},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -748,8 +748,10 @@ func TestDetectFormat(t *testing.T) {
 func TestLoadFileDetectsByExtension(t *testing.T) {
 	dir := t.TempDir()
 
-	// TOML body with no section header — only extension can pick TOML.
-	tomlOnly := `log_level = "warn"
+	// TOML body using `key = value` syntax that YAML cannot parse — the
+	// .toml extension is what selects the TOML decoder.
+	tomlOnly := `[logging]
+level = "warn"
 [remote.ssh]
 host = "1.2.3.4"
 [container]
@@ -764,8 +766,8 @@ mounts = ["/workspace"]
 	if err != nil {
 		t.Fatalf("LoadFile(toml) error = %v", err)
 	}
-	if cfg.Remote.SSH.Host != "1.2.3.4" || cfg.LogLevel != "warn" {
-		t.Fatalf("unexpected toml decode: %+v / %s", cfg.Remote.SSH, cfg.LogLevel)
+	if cfg.Remote.SSH.Host != "1.2.3.4" || cfg.Logging.Level != "warn" {
+		t.Fatalf("unexpected toml decode: %+v / %s", cfg.Remote.SSH, cfg.Logging.Level)
 	}
 
 	yamlBody := `remote:
@@ -791,7 +793,7 @@ container:
 func TestLoadParsesJSONConfig(t *testing.T) {
 	dir := t.TempDir()
 	raw := `{
-  "log_level": "debug",
+  "logging": {"level": "debug"},
   "remote": {
     "ssh": {"host": "10.0.0.1", "user": "dev", "port": 2222},
     "os": "linux",
@@ -811,8 +813,8 @@ func TestLoadParsesJSONConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFile(json) error = %v", err)
 	}
-	if cfg.LogLevel != "debug" {
-		t.Fatalf("expected log_level debug, got %q", cfg.LogLevel)
+	if cfg.Logging.Level != "debug" {
+		t.Fatalf("expected logging.level debug, got %q", cfg.Logging.Level)
 	}
 	if cfg.Remote.SSH.Host != "10.0.0.1" || cfg.Remote.SSH.Port != 2222 {
 		t.Fatalf("unexpected ssh: %+v", cfg.Remote.SSH)

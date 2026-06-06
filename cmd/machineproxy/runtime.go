@@ -437,8 +437,8 @@ func (d *runtimeDeps) StartBroker(ctx context.Context) error {
 		d.log.With("component", "transfer"),
 	)
 
-	if d.cfg.Recording.Path != "" && d.recorder == nil {
-		rec, recErr := agentproto.NewRecorder(d.cfg.Recording.Path)
+	if d.cfg.Logging.RecordingFile != "" && d.recorder == nil {
+		rec, recErr := agentproto.NewRecorder(d.cfg.Logging.RecordingFile)
 		if recErr != nil {
 			return fmt.Errorf("create session recorder: %w", recErr)
 		}
