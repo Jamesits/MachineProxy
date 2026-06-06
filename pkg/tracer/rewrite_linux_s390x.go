@@ -116,4 +116,17 @@ func (r *SyscallRegs) StackPointer() uintptr {
 	return uintptr(r.regs.Gprs[15])
 }
 
+// s390x uses the negative-errno convention; the result lands in r2 (Gprs[2]).
+func (r *SyscallRegs) Ret() (uintptr, bool) {
+	return uintptr(r.regs.Gprs[2]), int64(r.regs.Gprs[2]) >= 0
+}
+
+func (r *SyscallRegs) SetRetSuccess(v uintptr) {
+	r.regs.Gprs[2] = uint64(v)
+}
+
+func (r *SyscallRegs) SetRetError(errno uintptr) {
+	r.regs.Gprs[2] = uint64(-int64(errno))
+}
+
 const ptrSize = int(unsafe.Sizeof(uintptr(0)))

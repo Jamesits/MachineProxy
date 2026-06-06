@@ -62,9 +62,28 @@ local_commands = [
 # If unset, defaults to the first local path in the `container.mounts` array.
 # working_dir = "/workspace"
 
+# Which working directory to chdir into for the first program launched in the
+# container. A non-empty `container.working_dir` always wins; cwd_mode only
+# decides what to use when working_dir is empty:
+#   "inherit"  — the first mount's local path (default)
+#   "local"    — the first mount's local path
+#   "remote"   — the first mount's remote path
+#   "explicit" — require `container.working_dir` to be set in the config or via the command line argument
+# cwd_mode = "inherit"
+
+# Whether the tracer rewrites the working directory the process *observes*
+# (the getcwd(2) syscall and the initial `$PWD` env var), mapping the first mount's
+# container-side path prefix to its remote path. This is independent
+# of cwd_mode (which sets the real chdir).
+# Note that if you `cd` in a shell, the shell will reset `$PWD` itself. this behaviour is out of our control.
+#   "local"  — leave getcwd/$PWD untouched (default)
+#   "remote" — report remote paths to the process
+# cwd_remap = "local"
+
 # Docker Compose-style mounts: [local_path:]remote_path
 # A single path means the same path is used on both remote and container.
-# If working_dir is not set, the first mounted dir becomes your working dir.
+# The first mount path can be used as the working directory automatically — see `container.cwd_mode`.
+# Mounts set via the command line argument is prepended to this array.
 mounts = [
     "/workspace",
     "/some/local/path:/some/remote/path",

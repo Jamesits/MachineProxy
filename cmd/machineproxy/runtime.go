@@ -54,6 +54,12 @@ type runtimeDeps struct {
 	// Populated by MountWorkspace and consumed by StartBroker/RunChild.
 	workspaceMount config.Mount
 
+	// cwdFrom/cwdTo describe the getcwd(2)/$PWD prefix rewrite handed to the
+	// tracer (container.cwd_remap). Empty cwdTo means no rewrite. Resolved
+	// in RunChild via resolveCwdRemap.
+	cwdFrom string
+	cwdTo   string
+
 	brokerCtxCancel context.CancelFunc
 }
 
@@ -582,11 +588,14 @@ func (d *runtimeDeps) RunChild(ctx context.Context, cmdline []string) error {
 
 	mount := d.workspaceMount
 
-	workingDir := d.cfg.Container.WorkingDir
-	if workingDir == "" {
-		workingDir = mount.ContainerPath
-		d.log.Info("container working_dir not set; defaulting to first mount", "working_dir", workingDir)
+	// Pick the directory to launch the first program in (container.cwd_mode).
+	// An explicit mode with an invalid working_dir fails startup here.
+	workingDir, err := d.resolveWorkingDir()
+	if err != nil {
+		return err
 	}
+	// Enable the tracer's getcwd/$PWD remap hook when container.cwd_remap=remote.
+	d.resolveCwdRemap()
 
 	binds := []ns.Bind{{Src: d.fuseMountDir, Dst: mount.ContainerPath}}
 	if d.pathStubMountDir != "" {
@@ -600,6 +609,52 @@ func (d *runtimeDeps) RunChild(ctx context.Context, cmdline []string) error {
 
 	d.log.Log(ctx, logging.LevelTrace, "launching child", "command", childArgv)
 	return d.namespace.Run(ctx, workingDir, childArgv, childEnv, binds)
+}
+
+// resolveWorkingDir picks the directory the first program is launched in,
+// per container.cwd_mode. A non-empty container.working_dir always wins;
+// otherwise the mode selects the first mount's local or remote path. For
+// "explicit" mode working_dir is required and must be a local directory,
+// otherwise startup fails with an ENOENT error.
+func (d *runtimeDeps) resolveWorkingDir() (string, error) {
+	mode := d.cfg.Container.CwdMode
+	wd := d.cfg.Container.WorkingDir // raw config value; "" means unset
+
+	if mode == config.CwdModeExplicit {
+		if wd == "" {
+			return "", fmt.Errorf("container.cwd_mode=explicit requires container.working_dir: %w", syscall.ENOENT)
+		}
+		if fi, err := os.Stat(wd); err != nil || !fi.IsDir() {
+			d.log.Error("container.cwd_mode=explicit: working_dir is not a local directory",
+				"working_dir", wd, "error", err)
+			return "", fmt.Errorf("container.working_dir %q is not a local directory: %w", wd, syscall.ENOENT)
+		}
+		return wd, nil
+	}
+
+	if wd != "" {
+		return wd, nil
+	}
+	if mode == config.CwdModeRemote {
+		return d.workspaceMount.RemotePath, nil
+	}
+	// inherit / local: the first mount's container-side path (the default).
+	return d.workspaceMount.ContainerPath, nil
+}
+
+// resolveCwdRemap enables the tracer's getcwd/$PWD remap hook when
+// container.cwd_remap=remote, rewriting the first mount's container-path
+// prefix to its remote path. It is a no-op (hook disabled) for "local" or
+// when the two sides coincide.
+func (d *runtimeDeps) resolveCwdRemap() {
+	if d.cfg.Container.CwdRemap != config.CwdRemapRemote {
+		return
+	}
+	if d.workspaceMount.ContainerPath == d.workspaceMount.RemotePath {
+		return
+	}
+	d.cwdFrom = d.workspaceMount.ContainerPath
+	d.cwdTo = d.workspaceMount.RemotePath
 }
 
 func currentUsername() (string, error) {

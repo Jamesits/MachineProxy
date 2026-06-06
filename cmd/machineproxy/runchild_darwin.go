@@ -41,5 +41,37 @@ func (d *runtimeDeps) buildChildInvocation(ctx context.Context, cmdline []string
 		out = append(out, "MPROXY_WHITELIST="+strings.Join(d.cfg.Container.LocalCommands, ":"))
 	}
 
+	// getcwd(3)/$PWD remapping (container.cwd_remap=remote). The interposer
+	// reads MPROXY_CWD_FROM/TO to rewrite getcwd results and $PWD on exec; we
+	// also remap $PWD in the initial env so the first process and its
+	// descendants inherit the mapped value.
+	if d.cwdTo != "" {
+		out = append(out, "MPROXY_CWD_FROM="+d.cwdFrom, "MPROXY_CWD_TO="+d.cwdTo)
+		out = remapPWDEnv(out, d.cwdFrom, d.cwdTo)
+		d.log.Log(ctx, logging.LevelTrace, "cwd remap enabled for interposer",
+			"from", d.cwdFrom, "to", d.cwdTo)
+	}
+
 	return cmdline, out, nil
+}
+
+// remapPWDEnv rewrites a "PWD=" entry in env using the CwdFrom→CwdTo prefix
+// rule, so the first process's logical working directory matches the
+// interposer's getcwd remap. The first PWD entry wins; the slice is returned
+// unchanged when no remap applies.
+func remapPWDEnv(env []string, from, to string) []string {
+	for i, e := range env {
+		v, ok := strings.CutPrefix(e, "PWD=")
+		if !ok {
+			continue
+		}
+		mapped, matched := config.RewritePathPrefix(v, from, to)
+		if !matched || mapped == v {
+			return env
+		}
+		out := append([]string(nil), env...)
+		out[i] = "PWD=" + mapped
+		return out
+	}
+	return env
 }

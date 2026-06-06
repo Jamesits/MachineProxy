@@ -120,4 +120,17 @@ func (r *SyscallRegs) StackPointer() uintptr {
 	return uintptr(r.regs.Uregs[armSp])
 }
 
+func (r *SyscallRegs) Ret() (uintptr, bool) {
+	v := r.regs.Uregs[armR0]
+	return uintptr(v), int32(v) >= 0
+}
+
+func (r *SyscallRegs) SetRetSuccess(v uintptr) {
+	r.regs.Uregs[armR0] = uint32(v)
+}
+
+func (r *SyscallRegs) SetRetError(errno uintptr) {
+	r.regs.Uregs[armR0] = uint32(-int32(errno))
+}
+
 const ptrSize = int(unsafe.Sizeof(uintptr(0)))

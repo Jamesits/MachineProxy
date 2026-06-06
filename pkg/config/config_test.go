@@ -657,6 +657,54 @@ mounts = ["/workspace", "/local:/remote"]
 	}
 }
 
+func TestAutoIdentityMounts(t *testing.T) {
+	raw := `
+remote:
+  ssh:
+    host: 127.0.0.1
+container:
+  auto_identity_mounts: true
+  mounts:
+    - /workspace
+    - /local:/remote
+    - /a:/remote
+    - /other/local:/other/remote
+`
+	cfg, err := Load(strings.NewReader(raw))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	want := []string{
+		"/workspace",
+		"/local:/remote",
+		"/a:/remote",
+		"/other/local:/other/remote",
+		"/remote:/remote", // appended once for /local:/remote (and /a:/remote deduped)
+		"/other/remote:/other/remote",
+	}
+	if !reflect.DeepEqual(cfg.Container.Mounts, want) {
+		t.Fatalf("mounts =\n%#v\nwant\n%#v", cfg.Container.Mounts, want)
+	}
+}
+
+func TestAutoIdentityMountsDisabledByDefault(t *testing.T) {
+	raw := `
+remote:
+  ssh:
+    host: 127.0.0.1
+container:
+  mounts:
+    - /local:/remote
+`
+	cfg, err := Load(strings.NewReader(raw))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(cfg.Container.Mounts) != 1 {
+		t.Fatalf("expected mounts untouched, got %#v", cfg.Container.Mounts)
+	}
+}
+
 func TestLoadTOMLRejectsUnknownFields(t *testing.T) {
 	raw := `
 log_level = "info"

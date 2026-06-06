@@ -18,8 +18,15 @@
 // dylib; they always fall through to remote exec. This is a deliberate
 // scope reduction in the C implementation.
 //
+// When MPROXY_CWD_FROM / MPROXY_CWD_TO are set (container.cwd_remap=remote),
+// the dylib also rewrites the leading CWD_FROM path prefix to CWD_TO in
+// getcwd(3) results and in the $PWD env var handed to exec'd children,
+// preserving any sub-path. This mirrors the Linux ptrace tracer's getcwd /
+// $PWD remapping.
+//
 // Built per-arch (arm64 + amd64) by darwin/interposer/build.sh.
 
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -137,33 +144,134 @@ static int strip_dyld_on_whitelist(void) {
            v[0] == 'y' || v[0] == 'Y';
 }
 
-// filter_envp_strip_dyld returns a newly-allocated, NULL-terminated
-// envp with any DYLD_INSERT_LIBRARIES=... entry removed. Caller frees
-// with free(). Returns NULL on allocation failure; callers must fall
-// back to the original envp in that case.
-static char **filter_envp_strip_dyld(char *const envp[]) {
+// ----- cwd / $PWD remapping ------------------------------------------------
+
+// cwd_from / cwd_to return the configured remap prefixes, or NULL when
+// container.cwd_remap is not "remote" (the env vars are unset/empty).
+static const char *cwd_from(void) {
+    const char *v = getenv("MPROXY_CWD_FROM");
+    return (v && *v) ? v : NULL;
+}
+
+static const char *cwd_to(void) {
+    const char *v = getenv("MPROXY_CWD_TO");
+    return (v && *v) ? v : NULL;
+}
+
+// rewrite_prefix returns a malloc'd copy of p with a leading `from` path
+// component replaced by `to`, preserving the sub-path. It matches only on
+// whole path components: p must equal `from` or start with `from + "/"`.
+// Returns NULL when `from` does not prefix p (or on allocation failure).
+// Mirrors pkg/config.RewritePathPrefix. Caller frees.
+static char *rewrite_prefix(const char *p, const char *from, const char *to) {
+    if (!p || !from || !*from || !to) {
+        return NULL;
+    }
+    size_t flen = strlen(from);
+    if (strcmp(p, from) == 0) {
+        return strdup(to);
+    }
+    if (strncmp(p, from, flen) == 0 && p[flen] == '/') {
+        size_t tlen = strlen(to);
+        size_t suffix = strlen(p + flen); // sub-path including leading '/'
+        char *out = (char *)malloc(tlen + suffix + 1);
+        if (!out) {
+            return NULL;
+        }
+        memcpy(out, to, tlen);
+        memcpy(out + tlen, p + flen, suffix + 1); // copy sub-path incl. NUL
+        return out;
+    }
+    return NULL;
+}
+
+// remap_pwd_value takes a "PWD=<value>" env entry and returns a malloc'd
+// "PWD=<remapped>" string when <value> falls under CWD_FROM, else NULL.
+static char *remap_pwd_value(const char *entry) {
+    const char *from = cwd_from();
+    const char *to = cwd_to();
+    if (!from || !to) {
+        return NULL;
+    }
+    char *mapped = rewrite_prefix(entry + 4 /* skip "PWD=" */, from, to);
+    if (!mapped) {
+        return NULL;
+    }
+    size_t mlen = strlen(mapped);
+    char *out = (char *)malloc(4 + mlen + 1);
+    if (out) {
+        memcpy(out, "PWD=", 4);
+        memcpy(out + 4, mapped, mlen + 1);
+    }
+    free(mapped);
+    return out;
+}
+
+// remap_pwd_in_environ rewrites the process's own $PWD in place (via
+// setenv) when it falls under CWD_FROM. Used on the whitelisted execv /
+// execvp paths, which re-invoke the real call against the live environ.
+static void remap_pwd_in_environ(void) {
+    const char *pwd = getenv("PWD");
+    const char *from = cwd_from();
+    const char *to = cwd_to();
+    if (!pwd || !from || !to) {
+        return;
+    }
+    char *mapped = rewrite_prefix(pwd, from, to);
+    if (!mapped) {
+        return;
+    }
+    setenv("PWD", mapped, 1);
+    free(mapped);
+}
+
+// build_exec_envp derives a new NULL-terminated envp from envp, applying
+// the $PWD cwd-remap (whenever configured) and, when strip_dyld is set,
+// dropping any DYLD_INSERT_LIBRARIES entry. Returns NULL when neither
+// transformation changes anything — callers then use the original envp.
+//
+// On success the returned array is malloc'd and borrows envp's strings,
+// except a rewritten PWD entry: that malloc'd string is returned via
+// *owned_pwd so the caller can free it alongside the array. *owned_pwd is
+// NULL when PWD was not rewritten.
+static char **build_exec_envp(char *const envp[], int strip_dyld,
+                              char **owned_pwd) {
+    *owned_pwd = NULL;
     if (!envp) {
         return NULL;
     }
-    static const char prefix[] = "DYLD_INSERT_LIBRARIES=";
-    static const size_t prefix_len = sizeof(prefix) - 1;
+    static const char dyld_prefix[] = "DYLD_INSERT_LIBRARIES=";
+    static const size_t dyld_len = sizeof(dyld_prefix) - 1;
 
+    char *new_pwd = NULL;
+    long pwd_idx = -1;
     size_t n = 0;
-    while (envp[n]) {
-        n++;
+    for (; envp[n]; n++) {
+        if (pwd_idx < 0 && strncmp(envp[n], "PWD=", 4) == 0) {
+            new_pwd = remap_pwd_value(envp[n]);
+            if (new_pwd) {
+                pwd_idx = (long)n;
+            }
+        }
     }
+    if (!new_pwd && !strip_dyld) {
+        return NULL;
+    }
+
     char **out = (char **)calloc(n + 1, sizeof(char *));
     if (!out) {
+        free(new_pwd);
         return NULL;
     }
     size_t j = 0;
     for (size_t i = 0; i < n; i++) {
-        if (strncmp(envp[i], prefix, prefix_len) == 0) {
+        if (strip_dyld && strncmp(envp[i], dyld_prefix, dyld_len) == 0) {
             continue;
         }
-        out[j++] = envp[i];
+        out[j++] = ((long)i == pwd_idx) ? new_pwd : envp[i];
     }
     out[j] = NULL;
+    *owned_pwd = new_pwd;
     return out;
 }
 
@@ -195,35 +303,83 @@ static char **current_environ(void) {
     return envp ? *envp : NULL;
 }
 
+// ----- getcwd --------------------------------------------------------------
+
+// mproxy_getcwd calls the real getcwd, then rewrites the CWD_FROM prefix of
+// the result to CWD_TO (preserving the sub-path), so the process observes
+// the remote view of its working directory. A no-op unless container.cwd_remap
+// is "remote" and the real cwd falls under CWD_FROM.
+static char *mproxy_getcwd(char *buf, size_t size) {
+    char *res = getcwd(buf, size);
+    if (!res) {
+        return res; // failure; errno already set by getcwd
+    }
+    const char *from = cwd_from();
+    const char *to = cwd_to();
+    if (!from || !to) {
+        return res;
+    }
+    char *mapped = rewrite_prefix(res, from, to);
+    if (!mapped) {
+        return res; // cwd not under CWD_FROM
+    }
+    size_t need = strlen(mapped) + 1;
+
+    if (buf == NULL) {
+        // getcwd allocated `res` itself (BSD extension); grow it to hold the
+        // possibly-longer remapped path and hand the new buffer back for the
+        // caller to free.
+        char *grown = (char *)realloc(res, need);
+        if (!grown) {
+            free(mapped);
+            return res; // keep the original buffer on allocation failure
+        }
+        memcpy(grown, mapped, need);
+        free(mapped);
+        return grown;
+    }
+
+    if (need > size) {
+        // The remapped path no longer fits the caller's buffer.
+        free(mapped);
+        errno = ERANGE;
+        return NULL;
+    }
+    memcpy(buf, mapped, need);
+    free(mapped);
+    return buf;
+}
+MPROXY_INTERPOSER(mproxy_getcwd, getcwd);
+
 // ----- execve --------------------------------------------------------------
 
 static int mproxy_execve(const char *path,
                          char *const argv[],
                          char *const envp[]) {
-    if (is_whitelisted(path)) {
-        if (strip_dyld_on_whitelist()) {
-            char **filtered = filter_envp_strip_dyld(envp);
-            if (filtered) {
-                int ret = execve(path, argv, filtered);
-                free(filtered);
-                return ret;
-            }
+    int wl = is_whitelisted(path);
+    // Apply $PWD remapping (always, when configured) and DYLD stripping
+    // (whitelist opt-in only) in one pass. eff_envp falls back to envp.
+    char *owned_pwd = NULL;
+    char **xenvp = build_exec_envp(envp, wl && strip_dyld_on_whitelist(), &owned_pwd);
+    char *const *eff_envp = xenvp ? xenvp : envp;
+
+    int ret;
+    if (wl) {
+        ret = execve(path, argv, eff_envp);
+    } else {
+        const char *shim = getenv("MPROXY_SHIM_PATH");
+        char **new_argv =
+            (shim && *shim) ? build_redirect_argv(shim, path, argv) : NULL;
+        if (new_argv) {
+            ret = execve(shim, new_argv, eff_envp);
+            free(new_argv);
+        } else {
+            ret = execve(path, argv, eff_envp);
         }
-        return execve(path, argv, envp);
     }
-    const char *shim = getenv("MPROXY_SHIM_PATH");
-    if (!shim || !*shim) {
-        return execve(path, argv, envp);
-    }
-    char **new_argv = build_redirect_argv(shim, path, argv);
-    if (!new_argv) {
-        return execve(path, argv, envp);
-    }
-    int ret = execve(shim, new_argv, envp);
-    // execve only returns on failure; free the allocation on the error
-    // path. The replacement argv referenced original argv strings, but
-    // we never own those.
-    free(new_argv);
+    // exec only returns on failure; free our scratch allocations.
+    free(xenvp);
+    free(owned_pwd);
     return ret;
 }
 MPROXY_INTERPOSER(mproxy_execve, execve);
@@ -235,6 +391,8 @@ static int mproxy_execv(const char *path, char *const argv[]) {
         if (strip_dyld_on_whitelist()) {
             unsetenv("DYLD_INSERT_LIBRARIES");
         }
+        // execv runs against the live environ; remap $PWD in place.
+        remap_pwd_in_environ();
         return execv(path, argv);
     }
     // Reuse the execve path so the rewrite logic stays in one place.
@@ -247,6 +405,7 @@ static int mproxy_execvp(const char *file, char *const argv[]) {
         if (strip_dyld_on_whitelist()) {
             unsetenv("DYLD_INSERT_LIBRARIES");
         }
+        remap_pwd_in_environ();
         return execvp(file, argv);
     }
     // execvp normally resolves `file` via $PATH locally. We deliberately
@@ -264,27 +423,28 @@ static int mproxy_posix_spawn(pid_t *pid, const char *path,
                               const posix_spawnattr_t *attrp,
                               char *const argv[],
                               char *const envp[]) {
-    if (is_whitelisted(path)) {
-        if (strip_dyld_on_whitelist()) {
-            char **filtered = filter_envp_strip_dyld(envp);
-            if (filtered) {
-                int ret = posix_spawn(pid, path, file_actions, attrp, argv, filtered);
-                free(filtered);
-                return ret;
-            }
+    int wl = is_whitelisted(path);
+    char *owned_pwd = NULL;
+    char **xenvp = build_exec_envp(envp, wl && strip_dyld_on_whitelist(), &owned_pwd);
+    char *const *eff_envp = xenvp ? xenvp : envp;
+
+    int ret;
+    if (wl) {
+        ret = posix_spawn(pid, path, file_actions, attrp, argv, eff_envp);
+    } else {
+        const char *shim = getenv("MPROXY_SHIM_PATH");
+        char **new_argv =
+            (shim && *shim) ? build_redirect_argv(shim, path, argv) : NULL;
+        if (new_argv) {
+            ret = posix_spawn(pid, shim, file_actions, attrp, new_argv, eff_envp);
+            free(new_argv);
+        } else {
+            ret = posix_spawn(pid, path, file_actions, attrp, argv, eff_envp);
         }
-        return posix_spawn(pid, path, file_actions, attrp, argv, envp);
     }
-    const char *shim = getenv("MPROXY_SHIM_PATH");
-    if (!shim || !*shim) {
-        return posix_spawn(pid, path, file_actions, attrp, argv, envp);
-    }
-    char **new_argv = build_redirect_argv(shim, path, argv);
-    if (!new_argv) {
-        return posix_spawn(pid, path, file_actions, attrp, argv, envp);
-    }
-    int ret = posix_spawn(pid, shim, file_actions, attrp, new_argv, envp);
-    free(new_argv);
+    // posix_spawn returns to the caller; free our scratch allocations.
+    free(xenvp);
+    free(owned_pwd);
     return ret;
 }
 MPROXY_INTERPOSER(mproxy_posix_spawn, posix_spawn);
@@ -294,29 +454,29 @@ static int mproxy_posix_spawnp(pid_t *pid, const char *file,
                                const posix_spawnattr_t *attrp,
                                char *const argv[],
                                char *const envp[]) {
-    if (is_whitelisted(file)) {
-        if (strip_dyld_on_whitelist()) {
-            char **filtered = filter_envp_strip_dyld(envp);
-            if (filtered) {
-                int ret = posix_spawnp(pid, file, file_actions, attrp, argv, filtered);
-                free(filtered);
-                return ret;
-            }
+    int wl = is_whitelisted(file);
+    char *owned_pwd = NULL;
+    char **xenvp = build_exec_envp(envp, wl && strip_dyld_on_whitelist(), &owned_pwd);
+    char *const *eff_envp = xenvp ? xenvp : envp;
+
+    int ret;
+    if (wl) {
+        ret = posix_spawnp(pid, file, file_actions, attrp, argv, eff_envp);
+    } else {
+        const char *shim = getenv("MPROXY_SHIM_PATH");
+        char **new_argv =
+            (shim && *shim) ? build_redirect_argv(shim, file, argv) : NULL;
+        if (new_argv) {
+            // Spawn the shim by absolute path (posix_spawn, not posix_spawnp);
+            // PATH search on the shim itself is unwanted.
+            ret = posix_spawn(pid, shim, file_actions, attrp, new_argv, eff_envp);
+            free(new_argv);
+        } else {
+            ret = posix_spawnp(pid, file, file_actions, attrp, argv, eff_envp);
         }
-        return posix_spawnp(pid, file, file_actions, attrp, argv, envp);
     }
-    const char *shim = getenv("MPROXY_SHIM_PATH");
-    if (!shim || !*shim) {
-        return posix_spawnp(pid, file, file_actions, attrp, argv, envp);
-    }
-    char **new_argv = build_redirect_argv(shim, file, argv);
-    if (!new_argv) {
-        return posix_spawnp(pid, file, file_actions, attrp, argv, envp);
-    }
-    // Spawn the shim by absolute path (posix_spawn, not posix_spawnp);
-    // PATH search on the shim itself is unwanted.
-    int ret = posix_spawn(pid, shim, file_actions, attrp, new_argv, envp);
-    free(new_argv);
+    free(xenvp);
+    free(owned_pwd);
     return ret;
 }
 MPROXY_INTERPOSER(mproxy_posix_spawnp, posix_spawnp);

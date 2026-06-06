@@ -102,6 +102,8 @@ func run(rawArgs []string) error {
 		cfg.Remote.Arch = parsed.arch
 	}
 	if len(parsed.mounts) > 0 {
+		// CLI mounts are prepended to config mounts, because the first entry of container.mounts can be set
+		// implicitly as the working directory, and we want the user to be able to use this feature.
 		cfg.Container.Mounts = append(parsed.mounts, cfg.Container.Mounts...)
 	}
 	if parsed.workdir != "" {

@@ -115,5 +115,21 @@ func (r *SyscallRegs) StackPointer() uintptr {
 	return uintptr(r.regs.Sp)
 }
 
+// Ret returns the syscall result register (x0) and whether the call
+// succeeded (arm64 uses the negative-errno convention).
+func (r *SyscallRegs) Ret() (uintptr, bool) {
+	return uintptr(r.regs.Regs[0]), int64(r.regs.Regs[0]) >= 0
+}
+
+// SetRetSuccess overwrites the result register with a successful return value.
+func (r *SyscallRegs) SetRetSuccess(v uintptr) {
+	r.regs.Regs[0] = uint64(v)
+}
+
+// SetRetError overwrites the result register with -errno (failure).
+func (r *SyscallRegs) SetRetError(errno uintptr) {
+	r.regs.Regs[0] = uint64(-int64(errno))
+}
+
 // ptrSize is used for pointer arithmetic.
 const ptrSize = int(unsafe.Sizeof(uintptr(0)))

@@ -107,4 +107,23 @@ func (r *SyscallRegs) StackPointer() uintptr {
 	return uintptr(r.regs.Gpr[1])
 }
 
+// ppcCR0SO is the Summary Overflow bit of CR0 (the most-significant condition
+// register field). ppc signals a syscall error by setting it and placing
+// errno in r3, rather than returning a negative result.
+const ppcCR0SO = 0x10000000
+
+func (r *SyscallRegs) Ret() (uintptr, bool) {
+	return uintptr(r.regs.Gpr[3]), r.regs.Ccr&ppcCR0SO == 0
+}
+
+func (r *SyscallRegs) SetRetSuccess(v uintptr) {
+	r.regs.Gpr[3] = uint64(v)
+	r.regs.Ccr &^= ppcCR0SO
+}
+
+func (r *SyscallRegs) SetRetError(errno uintptr) {
+	r.regs.Gpr[3] = uint64(errno)
+	r.regs.Ccr |= ppcCR0SO
+}
+
 const ptrSize = int(unsafe.Sizeof(uintptr(0)))

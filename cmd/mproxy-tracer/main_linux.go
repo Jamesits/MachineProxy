@@ -17,7 +17,7 @@ import (
 func main() {
 	cfg, childArgs, logLevel := parseArgs(os.Args[1:])
 	if cfg == nil || len(childArgs) == 0 {
-		slog.Error("usage: mproxy-tracer --shim-path PATH --broker-sock PATH [--whitelist PATH:PATH] [--log-level LEVEL] -- CMD [ARGS...]")
+		slog.Error("usage: mproxy-tracer --shim-path PATH --broker-sock PATH [--whitelist PATH:PATH] [--cwd-from PATH --cwd-to PATH] [--log-level LEVEL] -- CMD [ARGS...]")
 		os.Exit(2)
 	}
 
@@ -82,6 +82,18 @@ func parseArgs(args []string) (*tracer.Config, []string, string) {
 			}
 			i++
 			cfg.Whitelist = strings.Split(args[i], ":")
+		case "--cwd-from":
+			if i+1 >= len(args) {
+				return nil, nil, logLevel
+			}
+			i++
+			cfg.CwdFrom = args[i]
+		case "--cwd-to":
+			if i+1 >= len(args) {
+				return nil, nil, logLevel
+			}
+			i++
+			cfg.CwdTo = args[i]
 		case "--log-level":
 			if i+1 >= len(args) {
 				return nil, nil, logLevel

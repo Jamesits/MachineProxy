@@ -114,4 +114,20 @@ func (r *SyscallRegs) StackPointer() uintptr {
 	return uintptr(r.regs.Regs[mipsSP])
 }
 
+// MIPS signals a syscall error by setting a3 (Regs[mipsA3]) non-zero and
+// placing errno in v0, rather than returning a negative result.
+func (r *SyscallRegs) Ret() (uintptr, bool) {
+	return uintptr(r.regs.Regs[mipsV0]), r.regs.Regs[mipsA3] == 0
+}
+
+func (r *SyscallRegs) SetRetSuccess(v uintptr) {
+	r.regs.Regs[mipsV0] = uint64(v)
+	r.regs.Regs[mipsA3] = 0
+}
+
+func (r *SyscallRegs) SetRetError(errno uintptr) {
+	r.regs.Regs[mipsV0] = uint64(errno)
+	r.regs.Regs[mipsA3] = 1
+}
+
 const ptrSize = int(unsafe.Sizeof(uintptr(0)))

@@ -29,6 +29,9 @@ func (d *runtimeDeps) buildChildInvocation(ctx context.Context, cmdline []string
 	if len(d.cfg.Container.LocalCommands) > 0 {
 		argv = append(argv, "--whitelist", strings.Join(d.cfg.Container.LocalCommands, ":"))
 	}
+	if d.cwdTo != "" {
+		argv = append(argv, "--cwd-from", d.cwdFrom, "--cwd-to", d.cwdTo)
+	}
 	argv = append(argv, "--")
 	argv = append(argv, cmdline...)
 

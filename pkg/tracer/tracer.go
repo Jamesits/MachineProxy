@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime"
+	"strings"
 	"syscall"
 
 	"github.com/jamesits/machineproxy/pkg/config"
@@ -23,12 +24,23 @@ type Config struct {
 	Whitelist  []string     // Absolute paths that should execute locally.
 	BrokerSock string       // Path to broker Unix socket.
 	Log        *slog.Logger // Optional logger; defaults to slog.Default.
+
+	// CwdFrom/CwdTo, when both non-empty, enable getcwd(2) remapping: a
+	// getcwd result under CwdFrom has that prefix rewritten to CwdTo (the
+	// sub-path is preserved). See container.cwd_mode.
+	CwdFrom string
+	CwdTo   string
 }
 
 // pidState tracks per-process tracing state.
 type pidState struct {
 	inSyscall  bool // true = next syscall-stop is exit, false = entry
 	expectStop bool // true = expecting initial SIGSTOP from ptrace auto-attach
+
+	// getcwd interception: set on a getcwd syscall-entry, consumed on exit.
+	cwdPending bool
+	cwdBuf     uintptr // user buffer pointer (arg0)
+	cwdSize    uint64  // user buffer size (arg1)
 }
 
 // Tracer manages ptrace-based exec interception for all descendants of a
@@ -70,6 +82,12 @@ func (t *Tracer) Start(ctx context.Context, argv []string, env []string, onStart
 	// Ignore job-control signals so the tracer doesn't get stopped when
 	// the traced shell manipulates foreground process groups.
 	signal.Ignore(syscall.SIGTTOU, syscall.SIGTTIN)
+
+	// Remap PWD for the initial process so the logical working directory it
+	// (and the tree it spawns) inherits matches the remapped getcwd view.
+	if t.cwdMapEnabled() {
+		env, _ = remapPWDEnv(env, t.cfg.CwdFrom, t.cfg.CwdTo)
+	}
 
 	// Fork+exec the target directly with PTRACE_TRACEME. The child
 	// inherits our process group (the terminal foreground group), so
@@ -221,6 +239,30 @@ func (t *Tracer) handleSyscallStop(pid int) {
 		return
 	}
 
+	// getcwd(2) remapping keys off the syscall number and a pending flag
+	// rather than the entry/exit toggle below. A traced execve perturbs that
+	// toggle (the kernel delivers a lingering execve syscall-exit stop after
+	// PTRACE_EVENT_EXEC), but getcwd's own entry and exit stops always arrive
+	// as a consecutive pair: the first carries the buffer, the second the
+	// result. Keying off the syscall number is immune to the skew.
+	if t.cwdMapEnabled() {
+		if regs, err := GetRegs(pid); err == nil && regs.SyscallNum() == uint64(SysGetcwd()) {
+			if !ps.cwdPending {
+				// Entry: capture buf/size. getcwd(buf, size) places arg0/arg1
+				// in the same registers as execve's path/argv pointers.
+				ps.cwdBuf = regs.PathAddr(false)
+				ps.cwdSize = uint64(regs.ArgvAddr(false))
+				ps.cwdPending = true
+			} else {
+				// Exit: rewrite the result the kernel just wrote.
+				ps.cwdPending = false
+				t.rewriteGetcwd(pid, ps, regs)
+			}
+			ps.inSyscall = !ps.inSyscall
+			return
+		}
+	}
+
 	if ps.inSyscall {
 		// Syscall-exit: nothing to do.
 		ps.inSyscall = false
@@ -254,6 +296,9 @@ func (t *Tracer) handleSyscallStop(pid int) {
 	}
 	if t.shouldAllow(pathname) {
 		t.log.Log(t.ctx, logging.LevelTrace, "exec allowed (whitelisted)", "pid", pid, "path", pathname)
+		if t.cwdMapEnabled() {
+			t.remapAllowedExecPWD(pid, regs, isExecveat)
+		}
 		return
 	}
 
@@ -278,6 +323,11 @@ func (t *Tracer) handleSyscallStop(pid int) {
 
 	// Inject MPROXY_CHANGED_ENVS into envp.
 	newEnvp := t.baseline.InjectEnvVars(envp)
+
+	// Remap PWD so the remote command sees the mapped working directory.
+	if t.cwdMapEnabled() {
+		newEnvp, _ = remapPWDEnv(newEnvp, t.cfg.CwdFrom, t.cfg.CwdTo)
+	}
 
 	// Write rewritten data into the tracee's stack below SP. The kernel
 	// reads execve pointers from userspace before tearing down the old
@@ -325,6 +375,115 @@ func (t *Tracer) blockExec(pid int, regs *SyscallRegs, step string, err error) {
 	if setErr := regs.Set(pid); setErr != nil {
 		t.log.Warn("failed to block syscall; killing tracee", "pid", pid, "error", setErr)
 		_ = unix.Kill(pid, syscall.SIGKILL)
+	}
+}
+
+// cwdMapEnabled reports whether getcwd(2) / PWD remapping is configured.
+func (t *Tracer) cwdMapEnabled() bool {
+	return t.cfg.CwdFrom != "" && t.cfg.CwdTo != ""
+}
+
+// remapPWDEnv rewrites a "PWD=" entry in env using the same CwdFrom→CwdTo
+// prefix rule as the getcwd(2) hijack, so the logical working directory that
+// shells and tools read from $PWD matches what getcwd reports. It returns the
+// (possibly new) slice and whether anything changed. The first PWD entry wins,
+// mirroring how the kernel resolves duplicate env vars.
+func remapPWDEnv(env []string, from, to string) ([]string, bool) {
+	for i, e := range env {
+		v, ok := strings.CutPrefix(e, "PWD=")
+		if !ok {
+			continue
+		}
+		mapped, matched := config.RewritePathPrefix(v, from, to)
+		if !matched || mapped == v {
+			return env, false
+		}
+		out := make([]string, len(env))
+		copy(out, env)
+		out[i] = "PWD=" + mapped
+		return out, true
+	}
+	return env, false
+}
+
+// rewriteGetcwd rewrites the result of a getcwd(2) syscall so the traced
+// process observes its working directory under CwdTo instead of CwdFrom.
+// It runs on the syscall-exit stop using the buffer pointer/size captured at
+// entry and the exit-stop registers. Paths outside CwdFrom and failed calls
+// are left untouched; a remapped path that no longer fits the caller's buffer
+// yields -ERANGE.
+func (t *Tracer) rewriteGetcwd(pid int, ps *pidState, regs *SyscallRegs) {
+	if ps.cwdBuf == 0 {
+		return
+	}
+	ret, ok := regs.Ret()
+	if !ok || ret == 0 {
+		return // getcwd failed; leave the result alone
+	}
+
+	cwd, err := ReadString(pid, ps.cwdBuf)
+	if err != nil || cwd == "" {
+		return
+	}
+	mapped, matched := config.RewritePathPrefix(cwd, t.cfg.CwdFrom, t.cfg.CwdTo)
+	if !matched || mapped == cwd {
+		return
+	}
+
+	// The getcwd syscall returns the length of the path including the NUL.
+	needed := len(mapped) + 1
+	if uint64(needed) > ps.cwdSize {
+		t.log.Warn("getcwd remap does not fit caller buffer; returning ERANGE",
+			"pid", pid, "from", cwd, "to", mapped, "size", ps.cwdSize)
+		regs.SetRetError(uintptr(unix.ERANGE))
+		if err := regs.Set(pid); err != nil {
+			t.log.Warn("failed to set getcwd ERANGE", "pid", pid, "error", err)
+		}
+		return
+	}
+
+	if err := WriteBytes(pid, ps.cwdBuf, append([]byte(mapped), 0)); err != nil {
+		t.log.Warn("failed to write remapped getcwd buffer", "pid", pid, "error", err)
+		return
+	}
+	regs.SetRetSuccess(uintptr(needed))
+	if err := regs.Set(pid); err != nil {
+		t.log.Warn("failed to commit getcwd remap", "pid", pid, "error", err)
+		return
+	}
+	t.log.Log(t.ctx, logging.LevelTrace, "getcwd remapped", "pid", pid, "from", cwd, "to", mapped)
+}
+
+// remapAllowedExecPWD rewrites the PWD env var of a whitelisted (locally
+// executing) exec so its logical working directory matches the remapped
+// getcwd view. On any failure it leaves the original environment untouched —
+// the exec is allowed to proceed regardless.
+func (t *Tracer) remapAllowedExecPWD(pid int, regs *SyscallRegs, isExecveat bool) {
+	envp, err := ReadStringArray(pid, regs.EnvpAddr(isExecveat))
+	if err != nil {
+		return
+	}
+	newEnvp, changed := remapPWDEnv(envp, t.cfg.CwdFrom, t.cfg.CwdTo)
+	if !changed {
+		return
+	}
+
+	// Stage the new envp below SP (minus the amd64 red zone), mirroring the
+	// shim path. The kernel reads execve's envp from userspace before
+	// unmapping the old address space, so this scratch region is safe.
+	size := ptrSize // NULL terminator
+	for _, s := range newEnvp {
+		size += len(s) + 1 + ptrSize
+	}
+	sp := regs.StackPointer()
+	cursor := (sp - 256 - uintptr(size)) &^ (uintptr(ptrSize) - 1)
+	if _, err := WriteStringArray(pid, cursor, newEnvp); err != nil {
+		t.log.Warn("failed to write remapped PWD envp; leaving original", "pid", pid, "error", err)
+		return
+	}
+	regs.SetEnvpAddr(isExecveat, cursor)
+	if err := regs.Set(pid); err != nil {
+		t.log.Warn("failed to commit remapped PWD envp", "pid", pid, "error", err)
 	}
 }
 

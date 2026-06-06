@@ -23,6 +23,20 @@ const (
 	UIDGIDModeOverride = "override"
 )
 
+// Recognized values for Container.CwdMode. See the Container.CwdMode field.
+const (
+	CwdModeInherit  = "inherit"
+	CwdModeLocal    = "local"
+	CwdModeRemote   = "remote"
+	CwdModeExplicit = "explicit"
+)
+
+// Recognized values for Container.CwdRemap. See the Container.CwdRemap field.
+const (
+	CwdRemapLocal  = "local"
+	CwdRemapRemote = "remote"
+)
+
 func validateUIDGIDMode(name, value string) error {
 	switch value {
 	case UIDGIDModeTransparent, UIDGIDModeOverride:
@@ -170,6 +184,26 @@ func ParseMount(s string) (Mount, error) {
 	return Mount{RemotePath: remote, ContainerPath: expandedLocal}, nil
 }
 
+// RewritePathPrefix resolves p from one side of a mount to the other by
+// replacing a leading `from` path component with `to`, preserving any
+// sub-path below it. It matches only on whole path components: p must equal
+// `from` or start with `from + "/"`. It returns the rewritten path and true
+// on a match, or p unchanged and false otherwise. `from` and `to` are
+// swappable, so the same helper resolves either source or destination from
+// the other.
+func RewritePathPrefix(p, from, to string) (string, bool) {
+	if from == "" {
+		return p, false
+	}
+	if p == from {
+		return to, true
+	}
+	if strings.HasPrefix(p, from+"/") {
+		return to + p[len(from):], true
+	}
+	return p, false
+}
+
 // isAbsOrHomeRelative reports whether p is a valid path-like string
 // that ParseMount and Validate will accept: either an OS-absolute path
 // or a "~"/"~/..." home-relative path.
@@ -231,7 +265,21 @@ type Config struct {
 		// by their remote name resolve inside the container too.
 		AutoIdentityMounts bool   `yaml:"auto_identity_mounts" toml:"auto_identity_mounts" json:"auto_identity_mounts"`
 		WorkingDir         string `yaml:"working_dir" toml:"working_dir" json:"working_dir"` // override container working directory; defaults to first mount's local path
-		EnvRemove     []string `yaml:"env_remove" toml:"env_remove" json:"env_remove"`    // glob/regex patterns for env vars to strip from the container process
+		// CwdMode selects the working directory the first program is launched
+		// in (a real chdir before exec). A non-empty working_dir always wins;
+		// CwdMode only decides what to use when working_dir is empty:
+		//   "inherit"  — first mount's local (container) path (default)
+		//   "local"    — first mount's local (container) path
+		//   "remote"   — first mount's remote path
+		//   "explicit" — container.working_dir (required; must exist locally)
+		CwdMode string `yaml:"cwd_mode" toml:"cwd_mode" json:"cwd_mode"`
+		// CwdRemap gates the tracer's getcwd(2)/$PWD remapping hook (Linux
+		// only; ignored on darwin):
+		//   "local"  — leave getcwd/$PWD untouched (default)
+		//   "remote" — rewrite the first mount's container-path prefix to its
+		//              remote path in getcwd results and the $PWD env var
+		CwdRemap  string   `yaml:"cwd_remap" toml:"cwd_remap" json:"cwd_remap"`
+		EnvRemove []string `yaml:"env_remove" toml:"env_remove" json:"env_remove"` // glob/regex patterns for env vars to strip from the container process
 		// PathProxy controls the FUSE-backed PATH-stub directory that
 		// surfaces remote-side executables inside the container.
 		//   "prepend"  — stubs win over locally-installed binaries (default)
@@ -335,6 +383,12 @@ func (c *Config) applyDefaults() error {
 	if c.Container.PathStubDir == "" {
 		c.Container.PathStubDir = defaultPathStubDir()
 	}
+	if c.Container.CwdMode == "" {
+		c.Container.CwdMode = CwdModeInherit
+	}
+	if c.Container.CwdRemap == "" {
+		c.Container.CwdRemap = CwdRemapLocal
+	}
 	if c.Container.ForceResolveInitialCommandLocally == nil {
 		t := true
 		c.Container.ForceResolveInitialCommandLocally = &t
@@ -400,6 +454,7 @@ func (c *Config) applyDefaults() error {
 			return errors.New("components.interposer_path must be absolute")
 		}
 	}
+	c.applyAutoIdentityMounts()
 	return nil
 }
 
@@ -495,6 +550,20 @@ func (c *Config) Validate() error {
 	}
 	if c.Container.WorkingDir != "" && !filepath.IsAbs(c.Container.WorkingDir) {
 		return errors.New("container.working_dir must be absolute")
+	}
+	switch c.Container.CwdMode {
+	case CwdModeInherit, CwdModeLocal, CwdModeRemote:
+	case CwdModeExplicit:
+		if c.Container.WorkingDir == "" {
+			return errors.New("container.working_dir is required when container.cwd_mode=explicit")
+		}
+	default:
+		return fmt.Errorf("container.cwd_mode must be one of inherit, local, remote, explicit; got %q", c.Container.CwdMode)
+	}
+	switch c.Container.CwdRemap {
+	case CwdRemapLocal, CwdRemapRemote:
+	default:
+		return fmt.Errorf("container.cwd_remap must be one of local, remote; got %q", c.Container.CwdRemap)
 	}
 	for _, p := range c.Container.LocalCommands {
 		if _, err := CompileLocalCommand(p); err != nil {
