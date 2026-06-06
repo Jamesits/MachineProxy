@@ -70,6 +70,13 @@ mounts = [
     "/some/local/path:/some/remote/path",
 ]
 
+# When true, after `mounts` is parsed, append a "remote:remote" identity
+# entry for every mount whose local and remote paths differ. This makes the
+# mounted content reachable at its remote path inside the container too
+# (e.g. "/some/local/path:/some/remote/path" also gets mounted at
+# "/some/remote/path"). Defaults to false.
+# auto_identity_mounts = false
+
 # Env vars to strip from the container process (the executable launched
 # by machineproxy directly). Patterns are globs or /regex/ delimited.
 env_remove = [

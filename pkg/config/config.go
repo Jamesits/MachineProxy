@@ -223,8 +223,14 @@ type Config struct {
 
 	Container struct {
 		LocalCommands []string `yaml:"local_commands" toml:"local_commands" json:"local_commands"`
-		Mounts        []string `yaml:"mounts" toml:"mounts" json:"mounts"`                // docker-compose style: [local:]remote
-		WorkingDir    string   `yaml:"working_dir" toml:"working_dir" json:"working_dir"` // override container working directory; defaults to first mount's local path
+		Mounts        []string `yaml:"mounts" toml:"mounts" json:"mounts"` // docker-compose style: [local:]remote
+		// AutoIdentityMounts, when true, makes every mount whose local and
+		// remote paths differ also available at its remote path inside the
+		// container: after mounts are parsed, a "remote:remote" identity
+		// entry is appended for each such mount. This lets paths referenced
+		// by their remote name resolve inside the container too.
+		AutoIdentityMounts bool   `yaml:"auto_identity_mounts" toml:"auto_identity_mounts" json:"auto_identity_mounts"`
+		WorkingDir         string `yaml:"working_dir" toml:"working_dir" json:"working_dir"` // override container working directory; defaults to first mount's local path
 		EnvRemove     []string `yaml:"env_remove" toml:"env_remove" json:"env_remove"`    // glob/regex patterns for env vars to strip from the container process
 		// PathProxy controls the FUSE-backed PATH-stub directory that
 		// surfaces remote-side executables inside the container.
@@ -395,6 +401,60 @@ func (c *Config) applyDefaults() error {
 		}
 	}
 	return nil
+}
+
+// applyAutoIdentityMounts, when container.auto_identity_mounts is set,
+// appends a "remote:remote" identity entry for every existing mount whose
+// local and remote paths differ, so the mounted content is also reachable
+// at its remote path inside the container. Mounts that already map a path
+// to itself are left alone, and duplicate identity entries are skipped so
+// the same remote path is only added once.
+func (c *Config) applyAutoIdentityMounts() {
+	if !c.Container.AutoIdentityMounts {
+		return
+	}
+	log := slog.Default()
+	// Seed the dedup set with paths that are already mounted at an
+	// identity location to avoid producing duplicate bind targets.
+	seen := make(map[string]struct{})
+	for _, raw := range c.Container.Mounts {
+		if local, remote, ok := splitMountRaw(raw); ok && local == remote {
+			seen[remote] = struct{}{}
+		}
+	}
+	var added []string
+	for _, raw := range c.Container.Mounts {
+		local, remote, ok := splitMountRaw(raw)
+		if !ok || local == remote {
+			continue
+		}
+		if _, dup := seen[remote]; dup {
+			continue
+		}
+		seen[remote] = struct{}{}
+		entry := remote + ":" + remote
+		added = append(added, entry)
+		log.Debug("auto_identity_mounts: appending identity mount",
+			"source", raw,
+			"entry", entry,
+		)
+	}
+	c.Container.Mounts = append(c.Container.Mounts, added...)
+}
+
+// splitMountRaw splits a raw mount string into its local and remote halves
+// the same way ParseMount does (on the first ':'), without expanding or
+// validating either side. ok is false when the entry is empty. A
+// single-token entry yields equal local and remote values.
+func splitMountRaw(s string) (local, remote string, ok bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", "", false
+	}
+	if i := strings.Index(s, ":"); i >= 0 {
+		return s[:i], s[i+1:], true
+	}
+	return s, s, true
 }
 
 func (c *Config) Validate() error {

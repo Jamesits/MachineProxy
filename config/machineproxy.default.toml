@@ -5,6 +5,7 @@ log_level = "warn"
 log_file = "" # empty means stderr
 
 [container]
+
 # A list of programs that you want to run locally (or that you cannot install on the remote device)
 local_commands = [
     "amp",
@@ -19,9 +20,12 @@ local_commands = [
     "rtk",
     "rg",
 ]
+
 # filter environment variables that the remote device does not need
 env_remove = [
     "AMP_*",
     "ANTHROPIC_*",
     "VSCODE_*",
 ]
+
+auto_identity_mounts = true
