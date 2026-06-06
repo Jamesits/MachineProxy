@@ -61,6 +61,13 @@ func (r *Reaper) reapAll() {
 	for {
 		var ws syscall.WaitStatus
 		pid, err := syscall.Wait4(-1, &ws, syscall.WNOHANG, nil)
+		if err == syscall.EINTR {
+			// Async preemption (SIGURG) and other signals can interrupt the
+			// syscall. Returning here would abandon still-undrained zombies;
+			// if their SIGCHLD was the edge that woke us, nothing reaps them
+			// and the matching WaitFor blocks forever. Retry instead.
+			continue
+		}
 		if pid <= 0 || err != nil {
 			return
 		}
