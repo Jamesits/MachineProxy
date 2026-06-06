@@ -36,7 +36,11 @@ func run() int {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go subreaper.Reap(ctx)
+	// The reaper owns every wait4 in this process. The foreground child's
+	// status is obtained via reaper.WaitFor, not (*exec.Cmd).Wait, so the
+	// two never race over the same zombie.
+	reaper := subreaper.NewReaper()
+	go reaper.Run(ctx)
 
 	// The mux reads from our stdin and writes to our stdout.
 	// Our stderr goes to the SSH session's stderr channel for diagnostics.
@@ -219,16 +223,9 @@ func run() int {
 		}
 	}()
 
-	// Wait for child to exit.
-	waitErr := cmd.Wait()
-	code := 0
-	if waitErr != nil {
-		if cmd.ProcessState != nil {
-			code = childproc.ExitCode(cmd.ProcessState)
-		} else {
-			code = 127
-		}
-	}
+	// Wait for the child to exit. The reaper collects the zombie and reports
+	// its status here; calling cmd.Wait() instead would race the reaper.
+	code := reaper.WaitFor(cmd)
 
 	log.Debug("child exited", "code", code)
 
@@ -237,9 +234,6 @@ func run() int {
 
 	// Send exit frame.
 	exitFrame := &agentproto.Frame{Type: agentproto.FrameExit, Code: code}
-	if waitErr != nil && code == 127 {
-		exitFrame.Error = waitErr.Error()
-	}
 	if err := mux.Send(exitFrame); err != nil {
 		// Can't log over mux anymore, fall back to stderr.
 		slog.New(slog.NewTextHandler(os.Stderr, nil)).Warn("failed to send exit frame", "error", err)

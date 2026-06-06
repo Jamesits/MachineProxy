@@ -15,6 +15,14 @@ func ExitCode(state *os.ProcessState) int {
 	if !ok {
 		return state.ExitCode()
 	}
+	return ExitCodeFromWaitStatus(ws)
+}
+
+// ExitCodeFromWaitStatus maps a raw wait status to a conventional exit
+// code: 128+signal when the process was killed by a signal, otherwise the
+// process's own exit status. Used when the status was collected by a
+// wait4-based reaper rather than (*os.ProcessState).
+func ExitCodeFromWaitStatus(ws syscall.WaitStatus) int {
 	if ws.Signaled() {
 		return 128 + int(ws.Signal())
 	}
