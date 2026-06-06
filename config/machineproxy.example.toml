@@ -119,7 +119,8 @@ mounts = [
 
 # Env vars to strip from the container process (the executable launched
 # by machineproxy directly). Patterns are globs or /regex/ delimited.
-# env_remove = []
+# Default: ["MPROXY_*"]
+# env_remove = ["MPROXY_*"]
 
 # Path proxy: mount a FUSE directory containing one stub per remote-PATH
 # executable, and splice it into the container's PATH. Exec'ing a stub
@@ -132,6 +133,10 @@ mounts = [
 #   "append"   — local binaries win; stubs only fill gaps (default)
 #   "disabled" — skip enumeration entirely
 # path_proxy = "append"
+
+# Directory where the PATH-stub FUSE is bind-mounted inside the container.
+# Default: $HOME/.cache/machineproxy/pathstub
+# path_stub_dir = "~/.cache/machineproxy/pathstub"
 
 # Force the entrypoint command to be resolved against the local PATH
 # (skipping the path-stub directory) and auto-append the resolved path,
@@ -187,6 +192,10 @@ mounts = [
 # sent; any matching env_remove are always stripped. env_remove takes
 # priority over env_keep.
 # Patterns are globs (filepath.Match syntax) or /regex/ delimited.
+# Default env_keep (applied when the key is omitted):
+#   HOME, PATH, TERM, LANG, LC_*, USER, LOGNAME, SHELL,
+#   EDITOR, VISUAL, PAGER, TZ, DISPLAY, SSH_AUTH_SOCK, XDG_*
+# Override by uncommenting and editing:
 # env_keep = [
 #     "HOME",
 #     "PATH",
@@ -203,13 +212,14 @@ mounts = [
 #     "DISPLAY",
 #     "SSH_AUTH_SOCK",
 #     "XDG_*",
-#     "/^AWS_/",
 # ]
+# Default env_remove (applied when the key is omitted):
+#   LD_PRELOAD, LD_LIBRARY_PATH, MPROXY_*
+# Override by uncommenting and editing:
 # env_remove = [
 #     "LD_PRELOAD",
 #     "LD_LIBRARY_PATH",
 #     "MPROXY_*",
-#     "/SECRET/",
 # ]
 
 # Configure how MachineProxy finds its components.

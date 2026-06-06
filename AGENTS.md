@@ -24,11 +24,15 @@ Always perform a full rebuild with `goreleaser build --snapshot --clean`, and us
 ## Glossary
 ### Components
 - `machineproxy`: the user-facing program that chainloads the target program
-- `mproxy-tracer`/`darwin/interposer`: syscall/libc hook for the target program
-- `mproxy-shim`: launched locally in lieu of the intended program, proxies signals and FDs to the remote side
-- `mproxy-agent`: launched at remote to wrap the intended program, proxies signals and FDs to the local side
+- tracer
+  - `mproxy-tracer` (Linux only): ptrace-based syscall interceptor for the target program; runs inside the Container
+  - `darwin/interposer` (macOS only): a C dylib injected via `DYLD_INSERT_LIBRARIES`; libc-level exec hook that replaces `mproxy-tracer` on macOS; built by `darwin/interposer/build.sh`, not the Go build system
+- `mproxy-shim`: launched inside the Container in lieu of the intended program; proxies signals and FDs to the remote side
+- `mproxy-agent`: launched on the Remote to wrap the intended program; proxies signals and FDs to the local side
 
 ### Environments
 - Local: The user's workstation OS. `machineproxy` runs here.
-- Container: A Bubblewrap-created mount namespace on the Local machine. The target process, `mproxy-tracer`, and `mproxy-shim` run here. The remote workspace is mounted locally via FUSE/SFTP and bind-mounted into this namespace.
+- Container
+  - Linux: A Bubblewrap-created mount namespace on the Local machine. The target process, `mproxy-tracer`, and `mproxy-shim` run here. The remote workspace is mounted locally via FUSE/SFTP and bind-mounted into this namespace.
+  - macOS: `machineproxy` launches the target process directly, and exec interception is handled by `darwin/interposer` instead.
 - Remote: The SSH-accessible machine where non-whitelisted execs from the target process run. `mproxy-agent` runs here.

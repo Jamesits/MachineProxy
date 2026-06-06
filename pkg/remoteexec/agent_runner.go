@@ -82,7 +82,7 @@ func (r *AgentRunner) RunWithControl(ctx context.Context, req Request, ctrl *Con
 		return 127, fmt.Errorf("ensure agent binary: %w", err)
 	}
 
-	log.Debug("opening ssh session for agent (with control)")
+	log.Debug("opening backend session for agent (with control)")
 	session, err := r.Provider.NewSession(ctx)
 	if err != nil {
 		return 127, err
@@ -252,7 +252,7 @@ func (r *AgentRunner) EnumeratePaths(ctx context.Context, paths []string) ([]age
 		return nil, fmt.Errorf("ensure agent binary: %w", err)
 	}
 
-	log.Debug("opening ssh session for path enumeration")
+	log.Debug("opening backend session for path enumeration")
 	session, err := r.Provider.NewSession(ctx)
 	if err != nil {
 		return nil, err

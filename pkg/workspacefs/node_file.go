@@ -49,13 +49,13 @@ func (n *fileNode) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint3
 	accmode := int(flags) & syscall.O_ACCMODE
 	h := &fileHandle{flags: flags}
 	if accmode == os.O_RDONLY {
-		fh, err := n.backend.sftp.Open(n.backend.absPath(n.relPath))
+		fh, err := n.backend.files.Open(n.backend.absPath(n.relPath))
 		if err != nil {
 			return nil, 0, toErrno(err)
 		}
 		h.read = fh
 	} else {
-		fh, err := n.backend.sftp.OpenFile(n.backend.absPath(n.relPath), int(flags), 0)
+		fh, err := n.backend.files.OpenFile(n.backend.absPath(n.relPath), int(flags), 0)
 		if err != nil {
 			return nil, 0, toErrno(err)
 		}

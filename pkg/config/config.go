@@ -303,8 +303,8 @@ type Config struct {
 		EnvRemove []string `yaml:"env_remove" toml:"env_remove" json:"env_remove"` // glob/regex patterns for env vars to strip from the container process
 		// PathProxy controls the FUSE-backed PATH-stub directory that
 		// surfaces remote-side executables inside the container.
-		//   "prepend"  — stubs win over locally-installed binaries (default)
-		//   "append"   — local binaries win; stubs only fill gaps
+		//   "prepend"  — stubs win over locally-installed binaries
+		//   "append"   — local binaries win; stubs only fill gaps (default)
 		//   "disabled" — skip enumeration entirely
 		PathProxy string `yaml:"path_proxy" toml:"path_proxy" json:"path_proxy"`
 		// PathStubDir is the in-container directory where the stub FUSE

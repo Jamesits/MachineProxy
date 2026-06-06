@@ -83,7 +83,7 @@ func (n *dirNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (
 func (n *dirNode) Create(ctx context.Context, name string, flags uint32, mode uint32, out *fuse.EntryOut) (*fs.Inode, fs.FileHandle, uint32, syscall.Errno) {
 	rel := path.Join(n.relPath, name)
 	abs := n.backend.absPath(rel)
-	fh, err := n.backend.sftp.OpenFile(abs, int(flags)|os.O_CREATE, posixFileMode(mode))
+	fh, err := n.backend.files.OpenFile(abs, int(flags)|os.O_CREATE, posixFileMode(mode))
 	if err != nil {
 		n.backend.log.Warn("fuse create failed", "path", rel, "error", err)
 		return nil, nil, 0, toErrno(err)

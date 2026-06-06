@@ -70,7 +70,7 @@ type Options struct {
 // translated into the corresponding FileClient method call.
 type FileSystem struct {
 	root     string
-	sftp     remote.FileClient
+	files    remote.FileClient
 	log      *slog.Logger
 	uidMode  IDMode
 	gidMode  IDMode
@@ -80,11 +80,11 @@ type FileSystem struct {
 	localGID uint32
 }
 
-// New constructs a FileSystem backed by sftp, rooted at root. opts may
+// New constructs a FileSystem backed by files, rooted at root. opts may
 // be nil to accept the default override mapping with localUID/localGID
 // both zero (mostly useful for tests; production callers should set
 // the local IDs explicitly).
-func New(sftp remote.FileClient, root string, log *slog.Logger, opts *Options) *FileSystem {
+func New(files remote.FileClient, root string, log *slog.Logger, opts *Options) *FileSystem {
 	cleanRoot := path.Clean(root)
 	if cleanRoot == "." {
 		cleanRoot = "/"
@@ -94,7 +94,7 @@ func New(sftp remote.FileClient, root string, log *slog.Logger, opts *Options) *
 	}
 	fs := &FileSystem{
 		root:    cleanRoot,
-		sftp:    sftp,
+		files:   files,
 		log:     log,
 		uidMode: IDModeOverride,
 		gidMode: IDModeOverride,
@@ -191,7 +191,7 @@ func (f *FileSystem) ReadFile(ctx context.Context, rel string, off int64, size i
 	f.log.Log(ctx, logging.LevelTrace, "fuse read", "path", rel, "offset", off, "size", size)
 
 	abs := f.absPath(rel)
-	fh, err := f.sftp.Open(abs)
+	fh, err := f.files.Open(abs)
 	if err != nil {
 		f.log.Warn("fuse read open failed", "path", rel, "error", err)
 		return nil, toErrno(err)
@@ -217,7 +217,7 @@ func (f *FileSystem) ReadFile(ctx context.Context, rel string, off int64, size i
 
 func (f *FileSystem) Stat(ctx context.Context, rel string) (os.FileInfo, syscall.Errno) {
 	f.log.Log(ctx, logging.LevelTrace, "fuse stat", "path", rel)
-	st, err := f.sftp.Lstat(f.absPath(rel))
+	st, err := f.files.Lstat(f.absPath(rel))
 	if err != nil {
 		// ENOENT is the normal answer to "does this exist?" probes
 		// during Lookup; keep it visible without flooding warning logs.
@@ -233,7 +233,7 @@ func (f *FileSystem) Stat(ctx context.Context, rel string) (os.FileInfo, syscall
 
 func (f *FileSystem) ReadDir(ctx context.Context, rel string) ([]os.FileInfo, syscall.Errno) {
 	f.log.Log(ctx, logging.LevelTrace, "fuse readdir", "path", rel)
-	entries, err := f.sftp.ReadDir(f.absPath(rel))
+	entries, err := f.files.ReadDir(f.absPath(rel))
 	if err != nil {
 		f.log.Warn("fuse readdir failed", "path", rel, "error", err)
 		return nil, toErrno(err)
@@ -243,7 +243,7 @@ func (f *FileSystem) ReadDir(ctx context.Context, rel string) ([]os.FileInfo, sy
 
 func (f *FileSystem) Readlink(ctx context.Context, rel string) ([]byte, syscall.Errno) {
 	f.log.Log(ctx, logging.LevelTrace, "fuse readlink", "path", rel)
-	target, err := f.sftp.Readlink(f.absPath(rel))
+	target, err := f.files.Readlink(f.absPath(rel))
 	if err != nil {
 		f.log.Warn("fuse readlink failed", "path", rel, "error", err)
 		return nil, toErrno(err)
@@ -254,7 +254,7 @@ func (f *FileSystem) Readlink(ctx context.Context, rel string) ([]byte, syscall.
 func (f *FileSystem) WriteFile(ctx context.Context, rel string, data []byte, off int64) (uint32, syscall.Errno) {
 	f.log.Log(ctx, logging.LevelTrace, "fuse write", "path", rel, "offset", off, "size", len(data))
 	abs := f.absPath(rel)
-	fh, err := f.sftp.OpenFile(abs, os.O_WRONLY, 0)
+	fh, err := f.files.OpenFile(abs, os.O_WRONLY, 0)
 	if err != nil {
 		f.log.Warn("fuse write open failed", "path", rel, "error", err)
 		return 0, toErrno(err)
@@ -278,7 +278,7 @@ func (f *FileSystem) CreateFile(ctx context.Context, rel string, flags uint32, m
 	f.log.Log(ctx, logging.LevelTrace, "fuse create", "path", rel, "flags", flags, "mode", mode)
 	abs := f.absPath(rel)
 	openFlags := int(flags) | os.O_CREATE
-	fh, err := f.sftp.OpenFile(abs, openFlags, posixFileMode(mode))
+	fh, err := f.files.OpenFile(abs, openFlags, posixFileMode(mode))
 	if err != nil {
 		f.log.Warn("fuse create failed", "path", rel, "error", err)
 		return toErrno(err)
@@ -292,7 +292,7 @@ func (f *FileSystem) CreateFile(ctx context.Context, rel string, flags uint32, m
 
 func (f *FileSystem) MkDir(ctx context.Context, rel string, mode uint32) syscall.Errno {
 	f.log.Log(ctx, logging.LevelTrace, "fuse mkdir", "path", rel, "mode", mode)
-	if err := f.sftp.Mkdir(f.absPath(rel), posixFileMode(mode)); err != nil {
+	if err := f.files.Mkdir(f.absPath(rel), posixFileMode(mode)); err != nil {
 		f.log.Warn("fuse mkdir failed", "path", rel, "error", err)
 		return toErrno(err)
 	}
@@ -309,7 +309,7 @@ func (f *FileSystem) Unlink(ctx context.Context, rel string) syscall.Errno {
 		f.log.Warn("fuse unlink rejected directory", "path", rel)
 		return syscall.EISDIR
 	}
-	if err := f.sftp.Remove(f.absPath(rel)); err != nil {
+	if err := f.files.Remove(f.absPath(rel)); err != nil {
 		f.log.Warn("fuse unlink failed", "path", rel, "error", err)
 		return toErrno(err)
 	}
@@ -326,7 +326,7 @@ func (f *FileSystem) Rmdir(ctx context.Context, rel string) syscall.Errno {
 		f.log.Warn("fuse rmdir rejected non-directory", "path", rel)
 		return syscall.ENOTDIR
 	}
-	if err := f.sftp.Remove(f.absPath(rel)); err != nil {
+	if err := f.files.Remove(f.absPath(rel)); err != nil {
 		f.log.Warn("fuse rmdir failed", "path", rel, "error", err)
 		return toErrno(err)
 	}
@@ -335,7 +335,7 @@ func (f *FileSystem) Rmdir(ctx context.Context, rel string) syscall.Errno {
 
 func (f *FileSystem) Rename(ctx context.Context, oldRel, newRel string) syscall.Errno {
 	f.log.Log(ctx, logging.LevelTrace, "fuse rename", "from", oldRel, "to", newRel)
-	if err := f.sftp.Rename(f.absPath(oldRel), f.absPath(newRel)); err != nil {
+	if err := f.files.Rename(f.absPath(oldRel), f.absPath(newRel)); err != nil {
 		f.log.Warn("fuse rename failed", "from", oldRel, "to", newRel, "error", err)
 		return toErrno(err)
 	}
@@ -344,7 +344,7 @@ func (f *FileSystem) Rename(ctx context.Context, oldRel, newRel string) syscall.
 
 func (f *FileSystem) Symlink(ctx context.Context, target, linkRel string) syscall.Errno {
 	f.log.Log(ctx, logging.LevelTrace, "fuse symlink", "target", target, "link", linkRel)
-	if err := f.sftp.Symlink(target, f.absPath(linkRel)); err != nil {
+	if err := f.files.Symlink(target, f.absPath(linkRel)); err != nil {
 		f.log.Warn("fuse symlink failed", "target", target, "link", linkRel, "error", err)
 		return toErrno(err)
 	}
@@ -353,7 +353,7 @@ func (f *FileSystem) Symlink(ctx context.Context, target, linkRel string) syscal
 
 func (f *FileSystem) Link(ctx context.Context, oldRel, newRel string) syscall.Errno {
 	f.log.Log(ctx, logging.LevelTrace, "fuse link", "from", oldRel, "to", newRel)
-	if err := f.sftp.Link(f.absPath(oldRel), f.absPath(newRel)); err != nil {
+	if err := f.files.Link(f.absPath(oldRel), f.absPath(newRel)); err != nil {
 		f.log.Warn("fuse link failed", "from", oldRel, "to", newRel, "error", err)
 		return toErrno(err)
 	}
@@ -362,7 +362,7 @@ func (f *FileSystem) Link(ctx context.Context, oldRel, newRel string) syscall.Er
 
 func (f *FileSystem) Chmod(ctx context.Context, rel string, mode os.FileMode) syscall.Errno {
 	f.log.Log(ctx, logging.LevelTrace, "fuse chmod", "path", rel, "mode", mode)
-	if err := f.sftp.Chmod(f.absPath(rel), mode); err != nil {
+	if err := f.files.Chmod(f.absPath(rel), mode); err != nil {
 		f.log.Warn("fuse chmod failed", "path", rel, "mode", mode, "error", err)
 		return toErrno(err)
 	}
@@ -394,7 +394,7 @@ func (f *FileSystem) Chown(ctx context.Context, rel string, uid, gid uint32) sys
 			finalGID = currentGID(st.Sys())
 		}
 	}
-	if err := f.sftp.Chown(f.absPath(rel), int(finalUID), int(finalGID)); err != nil {
+	if err := f.files.Chown(f.absPath(rel), int(finalUID), int(finalGID)); err != nil {
 		f.log.Warn("fuse chown failed", "path", rel, "uid", finalUID, "gid", finalGID, "error", err)
 		return toErrno(err)
 	}
@@ -436,7 +436,7 @@ func (f *FileSystem) resolveChownGID(gid uint32) (uint32, chownDecision) {
 
 func (f *FileSystem) Chtimes(ctx context.Context, rel string, atime, mtime time.Time) syscall.Errno {
 	f.log.Log(ctx, logging.LevelTrace, "fuse chtimes", "path", rel, "atime", atime, "mtime", mtime)
-	if err := f.sftp.Chtimes(f.absPath(rel), atime, mtime); err != nil {
+	if err := f.files.Chtimes(f.absPath(rel), atime, mtime); err != nil {
 		f.log.Warn("fuse chtimes failed", "path", rel, "atime", atime, "mtime", mtime, "error", err)
 		return toErrno(err)
 	}
@@ -445,7 +445,7 @@ func (f *FileSystem) Chtimes(ctx context.Context, rel string, atime, mtime time.
 
 func (f *FileSystem) Truncate(ctx context.Context, rel string, size int64) syscall.Errno {
 	f.log.Log(ctx, logging.LevelTrace, "fuse truncate", "path", rel, "size", size)
-	if err := f.sftp.Truncate(f.absPath(rel), size); err != nil {
+	if err := f.files.Truncate(f.absPath(rel), size); err != nil {
 		f.log.Warn("fuse truncate failed", "path", rel, "size", size, "error", err)
 		return toErrno(err)
 	}
@@ -454,7 +454,7 @@ func (f *FileSystem) Truncate(ctx context.Context, rel string, size int64) sysca
 
 func (f *FileSystem) Statfs(ctx context.Context, rel string, out *remote.Statfs) syscall.Errno {
 	f.log.Log(ctx, logging.LevelTrace, "fuse statfs", "path", rel)
-	st, err := f.sftp.Statfs(f.absPath(rel))
+	st, err := f.files.Statfs(f.absPath(rel))
 	if err != nil {
 		f.log.Warn("fuse statfs failed", "path", rel, "error", err)
 		return toErrno(err)
@@ -474,7 +474,7 @@ func (f *FileSystem) Statfs(ctx context.Context, rel string, out *remote.Statfs)
 func (f *FileSystem) Fsync(ctx context.Context, rel string) syscall.Errno {
 	f.log.Log(ctx, logging.LevelTrace, "fuse fsync", "path", rel)
 	abs := f.absPath(rel)
-	fh, err := f.sftp.Open(abs)
+	fh, err := f.files.Open(abs)
 	if err != nil {
 		f.log.Warn("fuse fsync open failed", "path", rel, "error", err)
 		return toErrno(err)

@@ -141,8 +141,18 @@ and target OS/architecture.
 .B [container]
 Local commands whitelist
 .RB ( local_commands ),
-workspace mounts, working directory, environment variable filtering,
-path-proxy mode, and file ownership translation.
+workspace mounts, working directory
+.RB ( working_dir ", " cwd_mode ", " cwd_remap ),
+environment variable filtering
+.RB ( env_remove ),
+path-proxy mode
+.RB ( path_proxy ", " path_stub_dir ),
+file ownership translation
+.RB ( uid_mode ", " gid_mode ", " uid_map ", " gid_map ),
+identity-mount expansion
+.RB ( auto_identity_mounts ),
+and initial command resolution
+.RB ( force_resolve_initial_command_locally ).
 .TP
 .B [agent]
 Environment variable filtering for the remote side.
@@ -151,13 +161,12 @@ Environment variable filtering for the remote side.
 Explicit paths to helper binaries
 .RB ( mproxy-shim ,
 .BR mproxy-tracer ,
-.BR mproxy-agent ).
+.BR mproxy-agent )
+and the macOS interposer dylib
+.RB ( interposer_path ).
 Auto-discovered from
 .I /usr/lib/machineproxy/
 when omitted.
-.TP
-.B [recording]
-Optional session recording in MachineProxy wire format.
 .SH EXIT STATUS
 .B machineproxy
 exits with the exit code of the child
@@ -189,6 +198,13 @@ Local shim that relays child process stdio to the remote agent.
 .I /usr/lib/machineproxy/mproxy-tracer
 .BR ptrace (2)-based
 exec interceptor (Linux only).
+.TP
+.I /usr/local/lib/machineproxy/agent/darwin/\fIarch\fR/libmproxy_interposer.dylib
+macOS exec interposer injected via
+.BR DYLD_INSERT_LIBRARIES .
+Replaces
+.B mproxy-tracer
+on macOS.
 .TP
 .I /usr/lib/machineproxy/agent/\fIos\fR/\fIarch\fR/mproxy-agent
 Remote agent binary, copied to the target machine at startup.

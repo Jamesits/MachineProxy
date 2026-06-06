@@ -94,12 +94,14 @@ func (b *Backend) Addr() string { return b.addr }
 // User implements remote.Backend.
 func (b *Backend) User() string { return b.cfg.User }
 
-// KeepAliveInterval implements remote.Backend.
-func (b *Backend) KeepAliveInterval() time.Duration { return b.keep }
+// KeepAliveInterval implements remote.Backend. Returns 0 because the
+// sshconn.Manager drives its own keepalive ticker; the generic runtime
+// must not call SendKeepAlive on top of that.
+func (b *Backend) KeepAliveInterval() time.Duration { return 0 }
 
-// SendKeepAlive implements remote.Backend. The sshconn.Manager already
-// drives keepalives internally; this is a no-op so the generic runtime
-// doesn't double-send.
+// SendKeepAlive implements remote.Backend. Keepalives are driven by the
+// sshconn.Manager internally; this method is unreachable in practice
+// because KeepAliveInterval returns 0.
 func (b *Backend) SendKeepAlive(ctx context.Context) error { return nil }
 
 // Start implements remote.Backend.
