@@ -158,7 +158,19 @@ DO NOT treat MachineProxy as a security barrier. Programs launched by MachinePro
 
 ### Mounts
 
-- DO NOT mount over your local home directory, otherwise your AI agents might not be able to read their config.
+DO NOT mount over your local home directory, otherwise:
+- Your AI agents might not be able to read their config
+- MachineProxy uses `$XDG_CACHE_DIR` for temporary storage, and this directory locates under your `$HOME` by default.
+
+### Connection to IPv6 Link Local Addresses
+
+Due to a Golant standard URL parsing library's issue, we have to encode the `%` into `%25`.
+
+```shell
+machineproxy ssh://user@[fe80::xxxx%25eth0] -- <program>
+```
+
+See [IPv6 zones in URLs are a mistake](https://xeiaso.net/notes/2026/ipv6-zones-go-url/).
 
 ### Pipe Performance
 
