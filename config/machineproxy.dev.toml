@@ -1,0 +1,29 @@
+# For local development
+
+[logging]
+level = "trace"
+# file = "/var/log/machineproxy.log"
+# recording_file = "/tmp/machineproxy-session.rec"
+
+[container]
+local_commands = [
+    "amp",
+    "claude",
+    "findmnt",
+    "env",
+    "rtk",
+    "vim",
+]
+
+mounts = [
+    "/workspace:/tmp",
+]
+
+auto_identity_mounts = true
+cwd_remap = "remote"
+
+[components]
+shim_path = "./dist/mproxy-shim_linux_amd64_v1/mproxy-shim"
+tracer_path = "./dist/mproxy-tracer_linux_amd64_v1/mproxy-tracer"
+agent_local_path = "./dist/agent/linux/amd64/mproxy-agent"
+agent_remote_path = "/tmp/mproxy-agent"

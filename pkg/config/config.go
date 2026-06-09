@@ -4,11 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"os/user"
-	"path"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 )
@@ -161,9 +158,9 @@ func ParseMount(s string) (Mount, error) {
 		return Mount{}, errors.New("mount entry must not be empty")
 	}
 	var local, remote string
-	if i := strings.Index(s, ":"); i >= 0 {
-		local = s[:i]
-		remote = s[i+1:]
+	if before, after, ok := strings.Cut(s, ":"); ok {
+		local = before
+		remote = after
 		if local == "" || remote == "" {
 			return Mount{}, fmt.Errorf("invalid mount %q: both local and remote paths are required around ':'", s)
 		}
@@ -416,22 +413,26 @@ func (c *Config) applyDefaults() error {
 	if c.Container.GIDMode == "" {
 		c.Container.GIDMode = UIDGIDModeOverride
 	}
-	// Expand all local-side path fields up front so downstream consumers
-	// only ever see absolute paths. Remote-side fields (AgentRemotePath,
-	// Container.Mounts remote half) keep their "~/..." form here and are
-	// expanded against the remote user's home at SFTP-use time.
+	// Expand local-side path fields up front so downstream consumers only
+	// ever see expanded paths. Component binary paths (abs=true) are also
+	// resolved to absolute paths against the current working directory at
+	// load time, so a later os.Chdir cannot change which binary they point
+	// at. Remote-side fields (AgentRemotePath, Container.Mounts remote half)
+	// keep their "~/..." form here and are expanded against the remote
+	// user's home at SFTP-use time.
 	for _, f := range []struct {
 		name string
 		ptr  *string
+		abs  bool
 	}{
-		{"logging.file", &c.Logging.File},
-		{"container.path_stub_dir", &c.Container.PathStubDir},
-		{"container.working_dir", &c.Container.WorkingDir},
-		{"components.shim_path", &c.Components.ShimPath},
-		{"components.tracer_path", &c.Components.TracerPath},
-		{"components.interposer_path", &c.Components.InterposerPath},
-		{"components.agent_local_path", &c.Components.AgentLocalPath},
-		{"logging.recording_file", &c.Logging.RecordingFile},
+		{"logging.file", &c.Logging.File, false},
+		{"container.path_stub_dir", &c.Container.PathStubDir, false},
+		{"container.working_dir", &c.Container.WorkingDir, false},
+		{"components.shim_path", &c.Components.ShimPath, true},
+		{"components.tracer_path", &c.Components.TracerPath, true},
+		{"components.interposer_path", &c.Components.InterposerPath, true},
+		{"components.agent_local_path", &c.Components.AgentLocalPath, true},
+		{"logging.recording_file", &c.Logging.RecordingFile, false},
 	} {
 		if *f.ptr == "" {
 			continue
@@ -439,6 +440,14 @@ func (c *Config) applyDefaults() error {
 		expanded, err := ExpandLocalHome(*f.ptr)
 		if err != nil {
 			return fmt.Errorf("%s: %w", f.name, err)
+		}
+		if f.abs {
+			// filepath.Abs resolves against os.Getwd() now, pinning the
+			// path before any subsequent working-directory change.
+			expanded, err = filepath.Abs(expanded)
+			if err != nil {
+				return fmt.Errorf("%s: %w", f.name, err)
+			}
 		}
 		*f.ptr = expanded
 	}
@@ -454,21 +463,6 @@ func (c *Config) applyDefaults() error {
 		c.Agent.EnvRemove = []string{
 			"LD_PRELOAD", "LD_LIBRARY_PATH",
 			"MPROXY_*",
-		}
-	}
-	if c.Components.ShimPath != "" {
-		if !filepath.IsAbs(c.Components.ShimPath) {
-			return errors.New("components.shim_path must be absolute")
-		}
-	}
-	if c.Components.TracerPath != "" {
-		if !filepath.IsAbs(c.Components.TracerPath) {
-			return errors.New("components.tracer_path must be absolute")
-		}
-	}
-	if c.Components.InterposerPath != "" {
-		if !filepath.IsAbs(c.Components.InterposerPath) {
-			return errors.New("components.interposer_path must be absolute")
 		}
 	}
 	c.applyAutoIdentityMounts()
@@ -652,181 +646,4 @@ func (c *Config) warnMountOverlaps() {
 			)
 		}
 	}
-}
-
-// isPosixAncestor reports whether ancestor is an ancestor of (or equal
-// to) p when both are interpreted as POSIX-style paths. Returns false
-// when the two paths use incompatible forms (one absolute, one "~/...").
-func isPosixAncestor(ancestor, p string) bool {
-	if ancestor == "" || p == "" {
-		return false
-	}
-	if homePrefix(ancestor) != homePrefix(p) {
-		return false
-	}
-	ancestor = path.Clean(ancestor)
-	p = path.Clean(p)
-	if ancestor == p {
-		return true
-	}
-	return strings.HasPrefix(p, ancestor+"/")
-}
-
-// isLocalAncestor is the host-filesystem counterpart of isPosixAncestor.
-// Both paths must already be absolute in the local OS path style.
-func isLocalAncestor(ancestor, p string) bool {
-	if ancestor == "" || p == "" {
-		return false
-	}
-	if !filepath.IsAbs(ancestor) || !filepath.IsAbs(p) {
-		return false
-	}
-	ancestor = filepath.Clean(ancestor)
-	p = filepath.Clean(p)
-	if ancestor == p {
-		return true
-	}
-	return strings.HasPrefix(p, ancestor+string(filepath.Separator))
-}
-
-// homePrefix returns "~" when p is home-relative ("~" or "~/...") and
-// "" when p is otherwise. Used to gate ancestor comparisons to compatible
-// path forms.
-func homePrefix(p string) string {
-	if p == "~" || strings.HasPrefix(p, "~/") {
-		return "~"
-	}
-	return ""
-}
-
-// defaultPathStubDir returns the resolved default for the PATH-stub
-// mount point: <local cache dir>/pathstub. If the local cache dir
-// cannot be resolved (typically because the home directory lookup
-// fails), we emit a warning and fall back to DefaultPathStubFallbackDir
-// so bwrap can still mkdir the bind target.
-func defaultPathStubDir() string {
-	base, err := LocalCacheDir()
-	if err == nil {
-		return filepath.Join(base, "pathstub")
-	}
-	slog.Default().Warn(
-		"could not resolve local cache directory; using path-stub fallback",
-		"error", err,
-		"fallback", DefaultPathStubFallbackDir,
-	)
-	return DefaultPathStubFallbackDir
-}
-
-// ExpandLocalHome resolves a leading "~" or "~/" against the local
-// user's home directory. Other paths are returned unchanged. Returns
-// an error only if "~" is used but the home dir cannot be looked up.
-func ExpandLocalHome(p string) (string, error) {
-	if p != "~" && !strings.HasPrefix(p, "~/") {
-		return p, nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("expand ~: %w", err)
-	}
-	if home == "" {
-		return "", errors.New("expand ~: home directory is empty")
-	}
-	if p == "~" {
-		return home, nil
-	}
-	return filepath.Join(home, p[2:]), nil
-}
-
-// ExpandRemoteHome resolves a leading "~" or "~/" against remoteHome
-// (typically the SFTP server's default working directory). Other paths
-// are returned unchanged. SFTP servers do not expand "~" themselves and
-// session.Start single-quotes its argument, so this rewrite must happen
-// client-side before any remote use.
-func ExpandRemoteHome(p, remoteHome string) (string, error) {
-	if p != "~" && !strings.HasPrefix(p, "~/") {
-		return p, nil
-	}
-	if remoteHome == "" {
-		return "", errors.New("expand ~: remote home directory is empty")
-	}
-	if p == "~" {
-		return remoteHome, nil
-	}
-	// path.Join (POSIX) — remote paths are SFTP/POSIX-style regardless
-	// of the local OS.
-	return path.Join(remoteHome, p[2:]), nil
-}
-
-// LocalCommandRule is a compiled local_commands entry that can match
-// against executable pathnames. Supported forms:
-//   - "/absolute/path"  — exact full path match
-//   - "/regex/"         — regex matched against the full pathname
-//   - "basename"        — matched against the last segment of the path
-type LocalCommandRule struct {
-	raw   string
-	regex *regexp.Regexp // non-nil for /regex/ entries
-	abs   string         // non-empty for /absolute/path entries
-	base  string         // non-empty for basename entries
-}
-
-// CompileLocalCommand parses and validates a local_commands entry,
-// returning a rule that can match pathnames.
-func CompileLocalCommand(s string) (*LocalCommandRule, error) {
-	if s == "" {
-		return nil, errors.New("entry must not be empty")
-	}
-
-	startsSlash := strings.HasPrefix(s, "/")
-	endsSlash := strings.HasSuffix(s, "/") && len(s) > 1
-
-	switch {
-	// /regex/ — delimited regex pattern
-	case startsSlash && endsSlash:
-		pattern := s[1 : len(s)-1]
-		if pattern == "" {
-			return nil, fmt.Errorf("regex pattern must not be empty: %q", s)
-		}
-		re, err := regexp.Compile(pattern)
-		if err != nil {
-			return nil, fmt.Errorf("invalid regex in %q: %w", s, err)
-		}
-		return &LocalCommandRule{raw: s, regex: re}, nil
-
-	// /absolute/path — full path match
-	case startsSlash && !endsSlash:
-		if !filepath.IsAbs(s) {
-			return nil, fmt.Errorf("entry must be an absolute path: %q", s)
-		}
-		return &LocalCommandRule{raw: s, abs: s}, nil
-
-	// basename — match against last segment of the executable path
-	case !startsSlash && !strings.Contains(s, "/"):
-		return &LocalCommandRule{raw: s, base: s}, nil
-
-	// Reject: slashes only in the middle (e.g. "usr/bin/env")
-	default:
-		return nil, fmt.Errorf("entry %q has slashes in the middle; use an absolute path (/usr/bin/env), a regex (/pattern/), or a bare name (env)", s)
-	}
-}
-
-// Match reports whether pathname matches this rule.
-func (r *LocalCommandRule) Match(pathname string) bool {
-	switch {
-	case r.regex != nil:
-		return r.regex.MatchString(pathname)
-	case r.abs != "":
-		return pathname == r.abs
-	default:
-		return filepath.Base(pathname) == r.base
-	}
-}
-
-// MatchLocalCommand is a convenience that compiles entry and matches in one
-// step. Returns false for malformed entries.
-func MatchLocalCommand(entry, pathname string) bool {
-	r, err := CompileLocalCommand(entry)
-	if err != nil {
-		return false
-	}
-	return r.Match(pathname)
 }

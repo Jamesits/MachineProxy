@@ -716,6 +716,57 @@ logging:
 	}
 }
 
+// TestLoadResolvesRelativeComponentPaths checks that relative
+// components.*_path values are pinned to absolute paths against the
+// working directory at load time, so they survive a later os.Chdir.
+func TestLoadResolvesRelativeComponentPaths(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	raw := `
+remote:
+  ssh:
+    host: 127.0.0.1
+    user: dev
+container:
+  local_commands:
+    - /usr/bin/env
+  mounts:
+    - /workspace
+components:
+  shim_path: bin/mproxy-shim
+  tracer_path: ./bin/mproxy-tracer
+  interposer_path: ../mproxy-interposer.dylib
+  agent_local_path: rel/mproxy-agent
+  agent_remote_path: ~/remote/mproxy-agent
+`
+	cfg, err := Load(strings.NewReader(raw))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	for _, c := range []struct {
+		name, got, want string
+	}{
+		{"shim_path", cfg.Components.ShimPath, filepath.Join(wd, "bin/mproxy-shim")},
+		{"tracer_path", cfg.Components.TracerPath, filepath.Join(wd, "bin/mproxy-tracer")},
+		{"interposer_path", cfg.Components.InterposerPath, filepath.Join(filepath.Dir(wd), "mproxy-interposer.dylib")},
+		{"agent_local_path", cfg.Components.AgentLocalPath, filepath.Join(wd, "rel/mproxy-agent")},
+	} {
+		if !filepath.IsAbs(c.got) {
+			t.Errorf("%s = %q, want absolute path", c.name, c.got)
+		}
+		if c.got != c.want {
+			t.Errorf("%s = %q, want %q", c.name, c.got, c.want)
+		}
+	}
+	// AgentRemotePath is a remote path and must not be resolved locally.
+	if cfg.Components.AgentRemotePath != "~/remote/mproxy-agent" {
+		t.Errorf("agent_remote_path = %q, want raw ~/remote/mproxy-agent",
+			cfg.Components.AgentRemotePath)
+	}
+}
+
 func TestParseMountRejectsEmpty(t *testing.T) {
 	_, err := ParseMount("")
 	if err == nil {

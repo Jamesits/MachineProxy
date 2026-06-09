@@ -1,10 +1,14 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 // Packager-overridable path defaults. These are var (not const) so a
@@ -125,4 +129,107 @@ func resolveBinary(name, configPath string, candidates []string) (string, error)
 	}
 
 	return "", fmt.Errorf("cannot find %s binary; set its path in the config or place it alongside machineproxy", name)
+}
+
+// isPosixAncestor reports whether ancestor is an ancestor of (or equal
+// to) p when both are interpreted as POSIX-style paths. Returns false
+// when the two paths use incompatible forms (one absolute, one "~/...").
+func isPosixAncestor(ancestor, p string) bool {
+	if ancestor == "" || p == "" {
+		return false
+	}
+	if homePrefix(ancestor) != homePrefix(p) {
+		return false
+	}
+	ancestor = path.Clean(ancestor)
+	p = path.Clean(p)
+	if ancestor == p {
+		return true
+	}
+	return strings.HasPrefix(p, ancestor+"/")
+}
+
+// isLocalAncestor is the host-filesystem counterpart of isPosixAncestor.
+// Both paths must already be absolute in the local OS path style.
+func isLocalAncestor(ancestor, p string) bool {
+	if ancestor == "" || p == "" {
+		return false
+	}
+	if !filepath.IsAbs(ancestor) || !filepath.IsAbs(p) {
+		return false
+	}
+	ancestor = filepath.Clean(ancestor)
+	p = filepath.Clean(p)
+	if ancestor == p {
+		return true
+	}
+	return strings.HasPrefix(p, ancestor+string(filepath.Separator))
+}
+
+// homePrefix returns "~" when p is home-relative ("~" or "~/...") and
+// "" when p is otherwise. Used to gate ancestor comparisons to compatible
+// path forms.
+func homePrefix(p string) string {
+	if p == "~" || strings.HasPrefix(p, "~/") {
+		return "~"
+	}
+	return ""
+}
+
+// defaultPathStubDir returns the resolved default for the PATH-stub
+// mount point: <local cache dir>/pathstub. If the local cache dir
+// cannot be resolved (typically because the home directory lookup
+// fails), we emit a warning and fall back to DefaultPathStubFallbackDir
+// so bwrap can still mkdir the bind target.
+func defaultPathStubDir() string {
+	base, err := LocalCacheDir()
+	if err == nil {
+		return filepath.Join(base, "pathstub")
+	}
+	slog.Default().Warn(
+		"could not resolve local cache directory; using path-stub fallback",
+		"error", err,
+		"fallback", DefaultPathStubFallbackDir,
+	)
+	return DefaultPathStubFallbackDir
+}
+
+// ExpandLocalHome resolves a leading "~" or "~/" against the local
+// user's home directory. Other paths are returned unchanged. Returns
+// an error only if "~" is used but the home dir cannot be looked up.
+func ExpandLocalHome(p string) (string, error) {
+	if p != "~" && !strings.HasPrefix(p, "~/") {
+		return p, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("expand ~: %w", err)
+	}
+	if home == "" {
+		return "", errors.New("expand ~: home directory is empty")
+	}
+	if p == "~" {
+		return home, nil
+	}
+	return filepath.Join(home, p[2:]), nil
+}
+
+// ExpandRemoteHome resolves a leading "~" or "~/" against remoteHome
+// (typically the SFTP server's default working directory). Other paths
+// are returned unchanged. SFTP servers do not expand "~" themselves and
+// session.Start single-quotes its argument, so this rewrite must happen
+// client-side before any remote use.
+func ExpandRemoteHome(p, remoteHome string) (string, error) {
+	if p != "~" && !strings.HasPrefix(p, "~/") {
+		return p, nil
+	}
+	if remoteHome == "" {
+		return "", errors.New("expand ~: remote home directory is empty")
+	}
+	if p == "~" {
+		return remoteHome, nil
+	}
+	// path.Join (POSIX) — remote paths are SFTP/POSIX-style regardless
+	// of the local OS.
+	return path.Join(remoteHome, p[2:]), nil
 }
