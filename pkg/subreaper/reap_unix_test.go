@@ -3,13 +3,29 @@
 package subreaper
 
 import (
-	"context"
 	"os/exec"
 	"strconv"
 	"sync"
 	"testing"
 	"time"
 )
+
+func startTestReaper(t *testing.T, r *Reaper) {
+	t.Helper()
+	ctx := t.Context()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		r.Run(ctx)
+	}()
+	t.Cleanup(func() {
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("reaper did not stop")
+		}
+	})
+}
 
 // waitForWithTimeout fails the test instead of hanging if WaitFor never
 // returns — the symptom of a reaper-vs-WaitFor race where the child's
@@ -31,10 +47,8 @@ func waitForWithTimeout(t *testing.T, r *Reaper, cmd *exec.Cmd, d time.Duration)
 // survives the concurrent wait4(-1) reaper. The loop exercises the timing
 // window between Start and WaitFor that the old standalone reaper lost.
 func TestReaperWaitForExitCode(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	r := NewReaper()
-	go r.Run(ctx)
+	startTestReaper(t, r)
 
 	cases := []struct {
 		name string
@@ -60,14 +74,29 @@ func TestReaperWaitForExitCode(t *testing.T) {
 	}
 }
 
+func TestReaperDrainsChildExitedBeforeRun(t *testing.T) {
+	r := NewReaper()
+	cmd := exec.Command("sh", "-c", "exit 5")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	// Let the child exit before Run installs signal.Notify. Without the
+	// startup drain in Run there is no SIGCHLD left to wake the reaper.
+	time.Sleep(100 * time.Millisecond)
+	startTestReaper(t, r)
+
+	if got := waitForWithTimeout(t, r, cmd, 2*time.Second); got != 5 {
+		t.Fatalf("WaitFor = %d, want %d", got, 5)
+	}
+}
+
 // TestReaperConcurrent runs many foreground children at once, stressing the
 // shared bookkeeping and ensuring each waiter gets its own child's status
 // while the reaper also drains them.
 func TestReaperConcurrent(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	r := NewReaper()
-	go r.Run(ctx)
+	startTestReaper(t, r)
 
 	var wg sync.WaitGroup
 	for i := 0; i < 40; i++ {

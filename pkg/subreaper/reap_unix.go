@@ -46,6 +46,11 @@ func (r *Reaper) Run(ctx context.Context) {
 	signal.Notify(sigch, syscall.SIGCHLD)
 	defer signal.Stop(sigch)
 
+	// Catch children that exited before this goroutine installed the SIGCHLD
+	// handler. That startup window otherwise has no signal edge left to wake
+	// the reaper, so a later WaitFor would block forever.
+	r.reapAll()
+
 	for {
 		select {
 		case <-ctx.Done():
