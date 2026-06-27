@@ -3,11 +3,11 @@ module github.com/jamesits/machineproxy
 go 1.26.1
 
 require (
-	github.com/docker/cli v29.5.3+incompatible
+	github.com/docker/cli v29.6.1+incompatible
 	github.com/fxamacker/cbor/v2 v2.9.2
 	github.com/hanwen/go-fuse/v2 v2.10.1
 	github.com/jamesits/sshconf v0.0.0-20260518084836-6ce2bdf84f47
-	github.com/pelletier/go-toml/v2 v2.3.1
+	github.com/pelletier/go-toml/v2 v2.4.2
 	github.com/pkg/sftp v1.13.10
 	golang.org/x/crypto v0.53.0
 	golang.org/x/sys v0.46.0
@@ -27,8 +27,8 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
-	github.com/moby/moby/api v1.54.2
-	github.com/moby/moby/client v0.4.1
+	github.com/moby/moby/api v1.55.0
+	github.com/moby/moby/client v0.5.0
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
