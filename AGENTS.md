@@ -19,7 +19,7 @@ Run a program locally while it accesses files and executes commands on a remote 
 - Run `go vet -tags backend_docker,backend_ssh ./...` (must be run in `GOOS`/`GOARCH` matrix), `golangci-lint run` and `go fmt ./...` after code change
 
 ## Compilation
-Always perform a full rebuild with `goreleaser build --snapshot --clean`, and use the artifacts under `dist/`.
+Always perform a full rebuild with `goreleaser build --snapshot --clean`, and use the artifacts under `dist/`. When compiling individual programs for testing, output to `out/`.
 
 ## Glossary
 ### Components

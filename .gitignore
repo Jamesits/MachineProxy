@@ -1,5 +1,10 @@
+/out
 /dist
 /darwin/interposer/build/
+*.tar.*
+*.apk
+*.deb
+*.rpm
 
 # Created by https://www.toptal.com/developers/gitignore/api/go,windows,macos,visualstudiocode
 # Edit at https://www.toptal.com/developers/gitignore?templates=go,windows,macos,visualstudiocode

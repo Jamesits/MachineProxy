@@ -3,7 +3,7 @@
 MachineProxy creates a mixed-reality environment for your agent, or for any other program. The program itself runs locally while seeing and acting on another machine over SSH. Harness features and tools work transparently.
 It solves the last-hop problem for your AI agent, even when the target machine is too outdated to install the agent on or has no Internet access.
 
-![Project Status - Premature](https://img.shields.io/badge/Project_Status-Premature-yellow)
+![Project Status - Feature Complete](https://img.shields.io/badge/Project_Status-Feature_Complete-2ea44f)
 ![100% AI Code](https://img.shields.io/badge/AI_Code-100%25-blue)
 ![Reviewed by a Human](https://img.shields.io/badge/Reviewed_by-a_Human-green)
 [![Go Reference](https://pkg.go.dev/badge/github.com/jamesits/machineproxy.svg)](https://pkg.go.dev/github.com/jamesits/machineproxy)
@@ -164,7 +164,7 @@ DO NOT mount over your local home directory, otherwise:
 
 ### Connection to IPv6 Link Local Addresses
 
-Due to a Golant standard URL parsing library's issue, we have to encode the `%` into `%25`.
+Due to a Golang standard URL parsing library's issue, we have to encode the `%` into `%25`.
 
 ```shell
 machineproxy ssh://user@[fe80::xxxx%25eth0] -- <program>
@@ -173,6 +173,8 @@ machineproxy ssh://user@[fe80::xxxx%25eth0] -- <program>
 See [IPv6 zones in URLs are a mistake](https://xeiaso.net/notes/2026/ipv6-zones-go-url/).
 
 ### Pipe Performance
+
+If there is a high latency or low bandwidth network between the local and remote machine, you'll have a bad day. There's nothing I can do about it, sorry.
 
 If the process setting up the pipe runs locally, and both the pipe sender and the receiver runs on the remote machine, the pipe goes through the SSH connection twice.
 
