@@ -86,7 +86,14 @@ func (a sftpClientAdapter) Readlink(p string) (string, error)         { return a
 func (a sftpClientAdapter) Mkdir(p string, mode os.FileMode) error    { return a.c.Mkdir(p) }
 func (a sftpClientAdapter) MkdirAll(p string, mode os.FileMode) error { return a.c.MkdirAll(p) }
 func (a sftpClientAdapter) Remove(p string) error                     { return a.c.Remove(p) }
-func (a sftpClientAdapter) Rename(old, new string) error              { return a.c.Rename(old, new) }
+func (a sftpClientAdapter) Rename(old, new string) error {
+	// Mirror the production wrapper in pkg/remote/ssh: prefer
+	// posix-rename so rename onto an existing path overwrites it.
+	if _, ok := a.c.HasExtension("posix-rename@openssh.com"); ok {
+		return a.c.PosixRename(old, new)
+	}
+	return a.c.Rename(old, new)
+}
 func (a sftpClientAdapter) Symlink(target, linkpath string) error {
 	return a.c.Symlink(target, linkpath)
 }
@@ -275,6 +282,45 @@ func TestIntegrationRename(t *testing.T) {
 	}
 	if string(data) != "content" {
 		t.Fatalf("content = %q, want %q", string(data), "content")
+	}
+}
+
+// TestIntegrationRenameOverwrite covers the atomic-save pattern used by
+// editors and Claude Code's file tools: write a temp file, then rename it
+// over the existing target. Plain SFTP v3 rename fails here with
+// SSH_FX_FAILURE (surfaced as EIO); posix-rename must overwrite instead.
+func TestIntegrationRenameOverwrite(t *testing.T) {
+	fs := testFS(t)
+	ctx := context.Background()
+
+	if errno := fs.CreateFile(ctx, "a.txt", uint32(os.O_CREATE|os.O_WRONLY|os.O_TRUNC), 0o644); errno != 0 {
+		t.Fatalf("CreateFile target: errno %v", errno)
+	}
+	if _, errno := fs.WriteFile(ctx, "a.txt", []byte("old"), 0); errno != 0 {
+		t.Fatalf("WriteFile target: errno %v", errno)
+	}
+
+	if errno := fs.CreateFile(ctx, "a.txt.tmp", uint32(os.O_CREATE|os.O_WRONLY|os.O_TRUNC), 0o644); errno != 0 {
+		t.Fatalf("CreateFile temp: errno %v", errno)
+	}
+	if _, errno := fs.WriteFile(ctx, "a.txt.tmp", []byte("new content"), 0); errno != 0 {
+		t.Fatalf("WriteFile temp: errno %v", errno)
+	}
+
+	if errno := fs.Rename(ctx, "a.txt.tmp", "a.txt"); errno != 0 {
+		t.Fatalf("Rename over existing target: errno %v", errno)
+	}
+
+	if _, errno := fs.Stat(ctx, "a.txt.tmp"); errno != syscall.ENOENT {
+		t.Fatalf("expected temp file gone (ENOENT), got %v", errno)
+	}
+
+	data, errno := fs.ReadFile(ctx, "a.txt", 0, 128)
+	if errno != 0 {
+		t.Fatalf("ReadFile target: errno %v", errno)
+	}
+	if string(data) != "new content" {
+		t.Fatalf("content = %q, want %q", string(data), "new content")
 	}
 }
 

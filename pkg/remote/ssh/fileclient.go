@@ -66,8 +66,24 @@ func (a *sftpFileClient) Mkdir(p string, mode os.FileMode) error {
 func (a *sftpFileClient) MkdirAll(p string, mode os.FileMode) error {
 	return a.c.MkdirAll(p)
 }
-func (a *sftpFileClient) Remove(p string) error        { return a.c.Remove(p) }
-func (a *sftpFileClient) Rename(old, new string) error { return a.c.Rename(old, new) }
+func (a *sftpFileClient) Remove(p string) error { return a.c.Remove(p) }
+
+// posixRenameExt is the OpenSSH SFTP extension that gives rename POSIX
+// semantics: atomically replacing the destination if it already exists.
+const posixRenameExt = "posix-rename@openssh.com"
+
+// Rename prefers the posix-rename@openssh.com extension so that renaming
+// onto an existing path overwrites it, matching POSIX rename(2). Plain
+// SFTP v3 rename fails with SSH_FX_FAILURE when the target exists, which
+// the FUSE layer surfaces as EIO; that breaks the write-temp-then-rename
+// pattern editors (and Claude Code's file tools) use for atomic saves.
+// Servers without the extension fall back to plain rename.
+func (a *sftpFileClient) Rename(old, new string) error {
+	if _, ok := a.c.HasExtension(posixRenameExt); ok {
+		return a.c.PosixRename(old, new)
+	}
+	return a.c.Rename(old, new)
+}
 func (a *sftpFileClient) Symlink(target, linkpath string) error {
 	return a.c.Symlink(target, linkpath)
 }
