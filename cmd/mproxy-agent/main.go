@@ -6,7 +6,10 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"sync"
+	"syscall"
+	"time"
 
 	"github.com/jamesits/machineproxy/pkg/agentproto"
 	"github.com/jamesits/machineproxy/pkg/childproc"
@@ -223,9 +226,27 @@ func run() int {
 		}
 	}()
 
-	// Wait for the child to exit. The reaper collects the zombie and reports
-	// its status here; calling cmd.Wait() instead would race the reaper.
-	code := reaper.WaitFor(cmd)
+	// Wait for the child to exit on its own, or for the local machine to
+	// disconnect — whichever happens first. WaitFor runs in a goroutine so we
+	// can also watch muxDone; the reaper collects the zombie and reports its
+	// status here, so calling cmd.Wait() instead would race the reaper.
+	childDone := make(chan int, 1)
+	go func() { childDone <- reaper.WaitFor(cmd) }()
+
+	var code int
+	select {
+	case code = <-childDone:
+		// Normal path: the child finished on its own.
+
+	case <-muxDone:
+		// The mux read loop ended before the child exited, which means our
+		// stdin (the local machine's side of the SSH session) hit EOF or a
+		// transport error: the connection is gone. The child would otherwise
+		// keep running orphaned on the remote host, so tear down its whole
+		// process group and exit with it.
+		log.Warn("local connection lost, terminating child", "pid", cmd.Process.Pid)
+		code = terminateChildGroup(log, cmd, childDone)
+	}
 
 	log.Debug("child exited", "code", code)
 
@@ -244,4 +265,30 @@ func run() int {
 	<-muxDone
 
 	return 0
+}
+
+// connectionLostGrace bounds how long the child's process group is given
+// to exit on its own after a SIGTERM before the agent force-kills it. It
+// only applies when the local machine disconnects mid-command.
+const connectionLostGrace = 5 * time.Second
+
+// terminateChildGroup tears down the child's process group after the local
+// connection drops. It asks politely with SIGTERM first so the child can
+// clean up, escalating to SIGKILL if the group outlives the grace period.
+// It returns the child's exit code, read from done (fed by the reaper's
+// WaitFor) once the group is gone.
+func terminateChildGroup(log *slog.Logger, cmd *exec.Cmd, done <-chan int) int {
+	if err := childproc.SignalGroup(cmd, int(syscall.SIGTERM)); err != nil {
+		log.Warn("failed to signal child group on disconnect", "signal", "SIGTERM", "error", err)
+	}
+	select {
+	case code := <-done:
+		return code
+	case <-time.After(connectionLostGrace):
+		log.Warn("child still alive after grace period, sending SIGKILL")
+		if err := childproc.SignalGroup(cmd, int(syscall.SIGKILL)); err != nil {
+			log.Warn("failed to signal child group on disconnect", "signal", "SIGKILL", "error", err)
+		}
+		return <-done
+	}
 }
