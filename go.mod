@@ -6,11 +6,11 @@ require (
 	github.com/docker/cli v29.6.1+incompatible
 	github.com/fxamacker/cbor/v2 v2.9.2
 	github.com/hanwen/go-fuse/v2 v2.10.1
-	github.com/jamesits/sshconf v0.0.0-20260518084836-6ce2bdf84f47
-	github.com/pelletier/go-toml/v2 v2.4.2
-	github.com/pkg/sftp v1.13.10
-	golang.org/x/crypto v0.53.0
-	golang.org/x/sys v0.46.0
+	github.com/jamesits/sshconf v0.0.0-20260715162204-84b28b622a53
+	github.com/pelletier/go-toml/v2 v2.4.3
+	github.com/pkg/sftp v1.13.11
+	golang.org/x/crypto v0.54.0
+	golang.org/x/sys v0.47.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -38,5 +38,5 @@ require (
 	go.opentelemetry.io/otel v1.44.0 // indirect
 	go.opentelemetry.io/otel/metric v1.44.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
-	golang.org/x/term v0.44.0 // indirect
+	golang.org/x/term v0.45.0 // indirect
 )
