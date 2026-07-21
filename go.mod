@@ -3,7 +3,7 @@ module github.com/jamesits/machineproxy
 go 1.26.1
 
 require (
-	github.com/docker/cli v29.6.1+incompatible
+	github.com/docker/cli v29.6.2+incompatible
 	github.com/fxamacker/cbor/v2 v2.9.2
 	github.com/hanwen/go-fuse/v2 v2.10.1
 	github.com/jamesits/sshconf v0.0.0-20260715162204-84b28b622a53
