@@ -3,9 +3,9 @@ module github.com/jamesits/machineproxy
 go 1.26.1
 
 require (
-	github.com/docker/cli v29.6.2+incompatible
+	github.com/docker/cli v29.7.1+incompatible
 	github.com/fxamacker/cbor/v2 v2.9.2
-	github.com/hanwen/go-fuse/v2 v2.10.1
+	github.com/hanwen/go-fuse/v2 v2.11.0
 	github.com/jamesits/sshconf v0.0.0-20260715162204-84b28b622a53
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/pkg/sftp v1.13.11
@@ -28,7 +28,7 @@ require (
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
 	github.com/moby/moby/api v1.55.0
-	github.com/moby/moby/client v0.5.0
+	github.com/moby/moby/client v0.5.1
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
