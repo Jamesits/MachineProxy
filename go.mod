@@ -3,13 +3,13 @@ module github.com/jamesits/machineproxy
 go 1.26.1
 
 require (
-	github.com/docker/cli v29.7.1+incompatible
-	github.com/fxamacker/cbor/v2 v2.9.2
+	github.com/docker/cli v29.7.2+incompatible
+	github.com/fxamacker/cbor/v2 v2.9.3
 	github.com/hanwen/go-fuse/v2 v2.11.0
 	github.com/jamesits/sshconf v0.0.0-20260715162204-84b28b622a53
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/pkg/sftp v1.13.11
-	golang.org/x/crypto v0.54.0
+	golang.org/x/crypto v0.55.0
 	golang.org/x/sys v0.47.0
 	gopkg.in/yaml.v3 v3.0.1
 )
