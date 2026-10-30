@@ -4,7 +4,7 @@ go 1.26.1
 
 require (
 	github.com/docker/cli v29.9.2+incompatible
-	github.com/fxamacker/cbor/v2 v2.9.6
+	github.com/fxamacker/cbor/v2 v2.10.0
 	github.com/hanwen/go-fuse/v2 v2.12.1
 	github.com/jamesits/sshconf v0.0.0-20260715162204-84b28b622a53
 	github.com/pelletier/go-toml/v2 v2.4.3
